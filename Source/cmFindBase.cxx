@@ -4,12 +4,12 @@
 
 #include <deque>
 #include <iostream>
-#include <iterator>
 #include <map>
 #include <stddef.h>
 
 #include "cmAlgorithms.h"
 #include "cmMakefile.h"
+#include "cmRange.h"
 #include "cmSearchPath.h"
 #include "cmState.h"
 #include "cmStateTypes.h"
@@ -66,8 +66,6 @@ bool cmFindBase::ParseArguments(std::vector<std::string> const& argsIn)
     return true;
   }
   this->AlreadyInCache = false;
-
-  this->SelectDefaultNoPackageRootPath();
 
   // Find the current root path mode.
   this->SelectDefaultRootPathMode();
@@ -131,13 +129,13 @@ bool cmFindBase::ParseArguments(std::vector<std::string> const& argsIn)
       this->VariableDocumentation += "the (unknown) library be found";
     } else if (this->Names.size() == 1) {
       this->VariableDocumentation +=
-        "the " + this->Names[0] + " library be found";
+        "the " + this->Names.front() + " library be found";
     } else {
       this->VariableDocumentation += "one of the ";
       this->VariableDocumentation +=
         cmJoin(cmMakeRange(this->Names).retreat(1), ", ");
       this->VariableDocumentation +=
-        " or " + this->Names[this->Names.size() - 1] + " libraries be found";
+        " or " + this->Names.back() + " libraries be found";
     }
   }
 
@@ -206,16 +204,10 @@ void cmFindBase::FillPackageRootPath()
 {
   cmSearchPath& paths = this->LabeledPaths[PathLabel::PackageRoot];
 
-  // Add package specific search prefixes
-  // NOTE: This should be using const_reverse_iterator but HP aCC and
-  //       Oracle sunCC both currently have standard library issues
-  //       with the reverse iterator APIs.
-  for (std::deque<std::string>::reverse_iterator pkg =
-         this->Makefile->FindPackageModuleStack.rbegin();
-       pkg != this->Makefile->FindPackageModuleStack.rend(); ++pkg) {
-    std::string varName = *pkg + "_ROOT";
-    paths.AddCMakePrefixPath(varName);
-    paths.AddEnvPrefixPath(varName);
+  // Add the PACKAGE_ROOT_PATH from each enclosing find_package call.
+  for (std::vector<std::string> const& pkgPaths :
+       cmReverseRange(this->Makefile->FindPackageRootPathStack)) {
+    paths.AddPrefixPaths(pkgPaths);
   }
 
   paths.AddSuffixes(this->SearchPathSuffixes);
@@ -225,8 +217,8 @@ void cmFindBase::FillCMakeVariablePath()
 {
   cmSearchPath& paths = this->LabeledPaths[PathLabel::CMake];
 
-  // Add CMake varibles of the same name as the previous environment
-  // varibles CMAKE_*_PATH to be used most of the time with -D
+  // Add CMake variables of the same name as the previous environment
+  // variables CMAKE_*_PATH to be used most of the time with -D
   // command line options
   std::string var = "CMAKE_";
   var += this->CMakePathName;

@@ -8,18 +8,18 @@
 #include "cmGeneratorTarget.h"
 #include "cmLocalGenerator.h"
 #include "cmMakefile.h"
-#include "cmOutputConverter.h"
 #include "cmStateTypes.h"
 #include "cmSystemTools.h"
 
 #include <memory> // IWYU pragma: keep
 #include <stddef.h>
+#include <utility>
 
 cmCustomCommandGenerator::cmCustomCommandGenerator(cmCustomCommand const& cc,
-                                                   const std::string& config,
+                                                   std::string config,
                                                    cmLocalGenerator* lg)
   : CC(cc)
-  , Config(config)
+  , Config(std::move(config))
   , LG(lg)
   , OldStyle(cc.GetEscapeOldStyle())
   , MakeVars(cc.GetEscapeAllowMakeVars())
@@ -37,10 +37,18 @@ cmCustomCommandGenerator::cmCustomCommandGenerator(cmCustomCommand const& cc,
         cmSystemTools::ExpandListArgument(parsed_arg, ExpandedArg);
         argv.insert(argv.end(), ExpandedArg.begin(), ExpandedArg.end());
       } else {
-        argv.push_back(parsed_arg);
+        argv.push_back(std::move(parsed_arg));
       }
     }
-    this->CommandLines.push_back(argv);
+
+    // Later code assumes at least one entry exists, but expanding
+    // lists on an empty command may have left this empty.
+    // FIXME: Should we define behavior for removing empty commands?
+    if (argv.empty()) {
+      argv.push_back(std::string());
+    }
+
+    this->CommandLines.push_back(std::move(argv));
   }
 
   std::vector<std::string> depends = this->CC.GetDepends();
@@ -50,11 +58,24 @@ cmCustomCommandGenerator::cmCustomCommandGenerator(cmCustomCommand const& cc,
     cmSystemTools::ExpandListArgument(cge->Evaluate(this->LG, this->Config),
                                       result);
     for (std::string& it : result) {
-      if (cmSystemTools::FileIsFullPath(it.c_str())) {
+      if (cmSystemTools::FileIsFullPath(it)) {
         it = cmSystemTools::CollapseFullPath(it);
       }
     }
     this->Depends.insert(this->Depends.end(), result.begin(), result.end());
+  }
+
+  const std::string& workingdirectory = this->CC.GetWorkingDirectory();
+  if (!workingdirectory.empty()) {
+    std::unique_ptr<cmCompiledGeneratorExpression> cge =
+      this->GE->Parse(workingdirectory);
+    this->WorkingDirectory = cge->Evaluate(this->LG, this->Config);
+    // Convert working directory to a full path.
+    if (!this->WorkingDirectory.empty()) {
+      std::string const& build_dir = this->LG->GetCurrentBinaryDirectory();
+      this->WorkingDirectory =
+        cmSystemTools::CollapseFullPath(this->WorkingDirectory, build_dir);
+    }
   }
 }
 
@@ -166,8 +187,7 @@ void cmCustomCommandGenerator::AppendArguments(unsigned int c,
     if (this->OldStyle) {
       cmd += escapeForShellOldStyle(arg);
     } else {
-      cmOutputConverter converter(this->LG->GetStateSnapshot());
-      cmd += converter.EscapeForShell(arg, this->MakeVars);
+      cmd += this->LG->EscapeForShell(arg, this->MakeVars);
     }
   }
 }
@@ -179,7 +199,7 @@ const char* cmCustomCommandGenerator::GetComment() const
 
 std::string cmCustomCommandGenerator::GetWorkingDirectory() const
 {
-  return this->CC.GetWorkingDirectory();
+  return this->WorkingDirectory;
 }
 
 std::vector<std::string> const& cmCustomCommandGenerator::GetOutputs() const

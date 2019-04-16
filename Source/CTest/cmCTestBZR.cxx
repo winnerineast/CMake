@@ -77,9 +77,7 @@ cmCTestBZR::cmCTestBZR(cmCTest* ct, std::ostream& log)
   cmSystemTools::PutEnv("BZR_PROGRESS_BAR=none");
 }
 
-cmCTestBZR::~cmCTestBZR()
-{
-}
+cmCTestBZR::~cmCTestBZR() = default;
 
 class cmCTestBZR::InfoParser : public cmCTestVC::LineParser
 {
@@ -155,8 +153,9 @@ bool cmCTestBZR::NoteOldRevision()
 {
   this->OldRevision = this->LoadInfo();
   this->Log << "Revision before update: " << this->OldRevision << "\n";
-  cmCTestLog(this->CTest, HANDLER_OUTPUT, "   Old revision of repository is: "
-               << this->OldRevision << "\n");
+  cmCTestLog(this->CTest, HANDLER_OUTPUT,
+             "   Old revision of repository is: " << this->OldRevision
+                                                  << "\n");
   this->PriorRev.Rev = this->OldRevision;
   return true;
 }
@@ -165,14 +164,16 @@ bool cmCTestBZR::NoteNewRevision()
 {
   this->NewRevision = this->LoadInfo();
   this->Log << "Revision after update: " << this->NewRevision << "\n";
-  cmCTestLog(this->CTest, HANDLER_OUTPUT, "   New revision of repository is: "
-               << this->NewRevision << "\n");
+  cmCTestLog(this->CTest, HANDLER_OUTPUT,
+             "   New revision of repository is: " << this->NewRevision
+                                                  << "\n");
   this->Log << "URL = " << this->URL << "\n";
   return true;
 }
 
-class cmCTestBZR::LogParser : public cmCTestVC::OutputLogger,
-                              private cmXMLParser
+class cmCTestBZR::LogParser
+  : public cmCTestVC::OutputLogger
+  , private cmXMLParser
 {
 public:
   LogParser(cmCTestBZR* bzr, const char* prefix)
@@ -364,7 +365,7 @@ bool cmCTestBZR::UpdateImpl()
   if (opts.empty()) {
     opts = this->CTest->GetCTestConfiguration("BZRUpdateOptions");
   }
-  std::vector<std::string> args = cmSystemTools::ParseArguments(opts.c_str());
+  std::vector<std::string> args = cmSystemTools::ParseArguments(opts);
 
   // TODO: if(this->CTest->GetTestModel() == cmCTest::NIGHTLY)
 

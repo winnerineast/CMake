@@ -9,7 +9,7 @@ Check whether the C compiler supports a given flag.
 
 .. command:: check_c_compiler_flag
 
-  ::
+  .. code-block:: cmake
 
     check_c_compiler_flag(<flag> <var>)
 
@@ -32,6 +32,7 @@ effect or even a specific one is beyond the scope of this module.
   in such variables may cause a false negative for this check.
 #]=======================================================================]
 
+include_guard(GLOBAL)
 include(CheckCSourceCompiles)
 include(CMakeCheckCompilerFlagCommonPatterns)
 

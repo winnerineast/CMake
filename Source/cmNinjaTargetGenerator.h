@@ -10,6 +10,7 @@
 #include "cmNinjaTypes.h"
 #include "cmOSXBundleGenerator.h"
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -64,6 +65,7 @@ protected:
   bool NeedExplicitPreprocessing(std::string const& lang) const;
   std::string LanguageDyndepRule(std::string const& lang) const;
   bool NeedDyndep(std::string const& lang) const;
+  bool UsePreprocessedSource(std::string const& lang) const;
 
   std::string OrderDependsTargetForTarget();
 
@@ -82,6 +84,9 @@ protected:
   std::string ComputeDefines(cmSourceFile const* source,
                              const std::string& language);
 
+  std::string ComputeIncludes(cmSourceFile const* source,
+                              const std::string& language);
+
   std::string ConvertToNinjaPath(const std::string& path) const
   {
     return this->GetGlobalGenerator()->ConvertToNinjaPath(path);
@@ -92,7 +97,7 @@ protected:
   }
 
   /// @return the list of link dependency for the given target @a target.
-  cmNinjaDeps ComputeLinkDeps() const;
+  cmNinjaDeps ComputeLinkDeps(const std::string& linkLanguage) const;
 
   /// @return the source file path for the given @a source.
   std::string GetSourceFilePath(cmSourceFile const* source) const;
@@ -132,7 +137,7 @@ protected:
   void EnsureDirectoryExists(const std::string& dir) const;
   void EnsureParentDirectoryExists(const std::string& path) const;
 
-  // write rules for Mac OS X Application Bundle content.
+  // write rules for macOS Application Bundle content.
   struct MacOSXContentGeneratorType
     : cmOSXBundleGenerator::MacOSXContentGeneratorType
   {
@@ -162,7 +167,7 @@ private:
   cmLocalNinjaGenerator* LocalGenerator;
   /// List of object files for this target.
   cmNinjaDeps Objects;
-  cmNinjaDeps DDIFiles; // TODO: Make per-language.
+  std::map<std::string, cmNinjaDeps> DDIFiles;
   std::vector<cmCustomCommand const*> CustomCommands;
   cmNinjaDeps ExtraFiles;
 };

@@ -20,7 +20,7 @@ class cmXCodeScheme
 public:
   typedef std::vector<const cmXCodeObject*> TestObjects;
 
-  cmXCodeScheme(cmXCodeObject* xcObj, const TestObjects& tests,
+  cmXCodeScheme(cmXCodeObject* xcObj, TestObjects tests,
                 const std::vector<std::string>& configList,
                 unsigned int xcVersion);
 
@@ -37,13 +37,23 @@ private:
   void WriteXCodeXCScheme(std::ostream& fout, const std::string& container);
 
   void WriteBuildAction(cmXMLWriter& xout, const std::string& container);
-  void WriteTestAction(cmXMLWriter& xout, std::string configuration,
+  void WriteTestAction(cmXMLWriter& xout, const std::string& configuration,
                        const std::string& container);
-  void WriteLaunchAction(cmXMLWriter& xout, std::string configuration,
+  void WriteLaunchAction(cmXMLWriter& xout, const std::string& configuration,
                          const std::string& container);
-  void WriteProfileAction(cmXMLWriter& xout, std::string configuration);
-  void WriteAnalyzeAction(cmXMLWriter& xout, std::string configuration);
-  void WriteArchiveAction(cmXMLWriter& xout, std::string configuration);
+
+  bool WriteLaunchActionAttribute(cmXMLWriter& xout,
+                                  const std::string& attrName,
+                                  const std::string& varName);
+
+  bool WriteLaunchActionAdditionalOption(cmXMLWriter& xout,
+                                         const std::string& attrName,
+                                         const std::string& value,
+                                         const std::string& varName);
+
+  void WriteProfileAction(cmXMLWriter& xout, const std::string& configuration);
+  void WriteAnalyzeAction(cmXMLWriter& xout, const std::string& configuration);
+  void WriteArchiveAction(cmXMLWriter& xout, const std::string& configuration);
 
   void WriteBuildableReference(cmXMLWriter& xout, const cmXCodeObject* xcObj,
                                const std::string& container);

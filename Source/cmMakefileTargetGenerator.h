@@ -12,12 +12,12 @@
 #include <vector>
 
 #include "cmCommonTargetGenerator.h"
+#include "cmGeneratorTarget.h"
 #include "cmLocalUnixMakefileGenerator3.h"
 #include "cmOSXBundleGenerator.h"
 
 class cmCustomCommandGenerator;
 class cmGeneratedFileStream;
-class cmGeneratorTarget;
 class cmGlobalUnixMakefileGenerator3;
 class cmLinkLineComputer;
 class cmOutputConverter;
@@ -52,6 +52,8 @@ public:
   cmGeneratorTarget* GetGeneratorTarget() { return this->GeneratorTarget; }
 
 protected:
+  void GetTargetLinkFlags(std::string& flags, const std::string& linkLanguage);
+
   // create the file and directory etc
   void CreateRuleFile();
 
@@ -63,16 +65,13 @@ protected:
   void WriteCommonCodeRules();
   void WriteTargetLanguageFlags();
 
-  // write the provide require rules for this target
-  void WriteTargetRequiresRules();
-
   // write the clean rules for this target
   void WriteTargetCleanRules();
 
   // write the depend rules for this target
   void WriteTargetDependRules();
 
-  // write rules for Mac OS X Application Bundle content.
+  // write rules for macOS Application Bundle content.
   struct MacOSXContentGeneratorType
     : cmOSXBundleGenerator::MacOSXContentGeneratorType
   {
@@ -129,7 +128,8 @@ protected:
   void AppendObjectDepends(std::vector<std::string>& depends);
 
   // Append link rule dependencies (objects, etc.).
-  void AppendLinkDepends(std::vector<std::string>& depends);
+  void AppendLinkDepends(std::vector<std::string>& depends,
+                         const std::string& linkLanguage);
 
   // Lookup the link rule for this target.
   std::string GetLinkRule(const std::string& linkRuleVar);
@@ -231,13 +231,9 @@ protected:
                      bool in_help = false);
 
   // Target name info.
-  std::string TargetNameOut;
-  std::string TargetNameSO;
-  std::string TargetNameReal;
-  std::string TargetNameImport;
-  std::string TargetNamePDB;
+  cmGeneratorTarget::Names TargetNames;
 
-  // Mac OS X content info.
+  // macOS content info.
   std::set<std::string> MacContentFolders;
   cmOSXBundleGenerator* OSXBundleGenerator;
   MacOSXContentGeneratorType* MacOSXContentGenerator;

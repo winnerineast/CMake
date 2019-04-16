@@ -17,17 +17,14 @@ if(MSVC OR _INTEL_WINDOWS)
 else()
 endif()
 
+if(MSVC)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stack:10000000")
+endif()
+
 #silence duplicate symbol warnings on AIX
 if(CMAKE_SYSTEM_NAME MATCHES "AIX")
   if(NOT CMAKE_COMPILER_IS_GNUCXX)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -bhalt:5 ")
-  endif()
-endif()
-
-if(CMAKE_SYSTEM_NAME MATCHES "IRIX")
-  if(NOT CMAKE_COMPILER_IS_GNUCXX)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wl,-woff84 -no_auto_include")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-woff15")
   endif()
 endif()
 
@@ -45,6 +42,15 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^parisc")
   if(CMAKE_COMPILER_IS_GNUCXX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mlong-calls")
   endif()
+endif()
+
+# Workaround for TOC Overflow on ppc64
+if(CMAKE_SYSTEM_NAME STREQUAL "AIX" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "powerpc")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-bbigtoc")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--no-multi-toc")
 endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL SunPro AND
@@ -78,3 +84,26 @@ endif ()
 if (CMAKE_ANSI_CFLAGS)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_ANSI_CFLAGS}")
 endif ()
+
+# Allow per-translation-unit parallel builds when using MSVC
+if(CMAKE_GENERATOR MATCHES "Visual Studio" AND
+   (CMAKE_C_COMPILER_ID MATCHES "MSVC|Intel" OR
+   CMAKE_CXX_COMPILER_ID MATCHES "MSVC|Intel"))
+
+  set(CMake_MSVC_PARALLEL ON CACHE STRING "\
+Enables /MP flag for parallel builds using MSVC. Specify an \
+integer value to control the number of threads used (Only \
+works on some older versions of Visual Studio). Setting to \
+ON lets the toolchain decide how many threads to use. Set to \
+OFF to disable /MP completely." )
+
+  if(CMake_MSVC_PARALLEL)
+    if(CMake_MSVC_PARALLEL GREATER 0)
+      string(APPEND CMAKE_C_FLAGS " /MP${CMake_MSVC_PARALLEL}")
+      string(APPEND CMAKE_CXX_FLAGS " /MP${CMake_MSVC_PARALLEL}")
+    else()
+      string(APPEND CMAKE_C_FLAGS " /MP")
+      string(APPEND CMAKE_CXX_FLAGS " /MP")
+    endif()
+  endif()
+endif()

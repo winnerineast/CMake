@@ -14,7 +14,6 @@
 #include "cmSourceFile.h"
 #include "cmStateTypes.h"
 #include "cmSystemTools.h"
-#include "cmake.h"
 
 #include <algorithm>
 #include <iterator>
@@ -27,15 +26,13 @@ cmNinjaUtilityTargetGenerator::cmNinjaUtilityTargetGenerator(
 {
 }
 
-cmNinjaUtilityTargetGenerator::~cmNinjaUtilityTargetGenerator()
-{
-}
+cmNinjaUtilityTargetGenerator::~cmNinjaUtilityTargetGenerator() = default;
 
 void cmNinjaUtilityTargetGenerator::Generate()
 {
   std::string utilCommandName =
     this->GetLocalGenerator()->GetCurrentBinaryDirectory();
-  utilCommandName += cmake::GetCMakeFilesDirectory();
+  utilCommandName += "/CMakeFiles";
   utilCommandName += "/";
   utilCommandName += this->GetTargetName() + ".util";
   utilCommandName = this->ConvertToNinjaPath(utilCommandName);
@@ -96,8 +93,8 @@ void cmNinjaUtilityTargetGenerator::Generate()
       this->GetBuildFileStream(),
       "Utility command for " + this->GetTargetName(), outputs, deps);
   } else {
-    std::string command =
-      this->GetLocalGenerator()->BuildCommandLine(commands);
+    std::string command = this->GetLocalGenerator()->BuildCommandLine(
+      commands, "utility", this->GeneratorTarget);
     const char* echoStr =
       this->GetGeneratorTarget()->GetProperty("EchoString");
     std::string desc;
