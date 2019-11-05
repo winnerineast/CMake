@@ -72,10 +72,15 @@ private:
   void WriteExcludeFromBuild(Elem& e2,
                              std::vector<size_t> const& exclude_configs);
   void WriteAllSources(Elem& e0);
+  void WritePackageReferences(Elem& e0);
+  void WritePackageReference(Elem& e1, std::string const& ref,
+                             std::string const& version);
   void WriteDotNetReferences(Elem& e0);
   void WriteDotNetReference(Elem& e1, std::string const& ref,
                             std::string const& hint,
                             std::string const& config);
+  void WriteDotNetDocumentationFile(Elem& e0);
+  void WriteImports(Elem& e0);
   void WriteDotNetReferenceCustomTags(Elem& e2, std::string const& ref);
   void WriteEmbeddedResourceGroup(Elem& e0);
   void WriteWinRTReferences(Elem& e0);
@@ -135,9 +140,10 @@ private:
   void WriteCustomRule(Elem& e0, cmSourceFile const* source,
                        cmCustomCommand const& command);
   void WriteCustomRuleCpp(Elem& e2, std::string const& config,
-                          std::string const& script, std::string const& inputs,
+                          std::string const& script,
+                          std::string const& additional_inputs,
                           std::string const& outputs,
-                          std::string const& comment);
+                          std::string const& comment, bool symbolic);
   void WriteCustomRuleCSharp(Elem& e0, std::string const& config,
                              std::string const& commandName,
                              std::string const& script,
@@ -181,8 +187,8 @@ private:
 
 private:
   friend class cmVS10GeneratorOptions;
-  typedef cmVS10GeneratorOptions Options;
-  typedef std::map<std::string, std::unique_ptr<Options>> OptionsMap;
+  using Options = cmVS10GeneratorOptions;
+  using OptionsMap = std::map<std::string, std::unique_ptr<Options>>;
   OptionsMap ClOptions;
   OptionsMap RcOptions;
   OptionsMap CudaOptions;
@@ -210,7 +216,7 @@ private:
   unsigned int NsightTegraVersion[4];
   bool TargetCompileAsWinRT;
   std::set<std::string> IPOEnabledConfigurations;
-  std::set<std::string> SpectreMitigationConfigurations;
+  std::map<std::string, std::string> SpectreMitigation;
   cmGlobalVisualStudio10Generator* const GlobalGenerator;
   cmLocalVisualStudio10Generator* const LocalGenerator;
   std::set<std::string> CSharpCustomCommandNames;
@@ -219,16 +225,16 @@ private:
   std::string DefaultArtifactDir;
   bool AddedDefaultCertificate = false;
   // managed C++/C# relevant members
-  typedef std::pair<std::string, std::string> DotNetHintReference;
-  typedef std::vector<DotNetHintReference> DotNetHintReferenceList;
-  typedef std::map<std::string, DotNetHintReferenceList>
-    DotNetHintReferenceMap;
+  using DotNetHintReference = std::pair<std::string, std::string>;
+  using DotNetHintReferenceList = std::vector<DotNetHintReference>;
+  using DotNetHintReferenceMap =
+    std::map<std::string, DotNetHintReferenceList>;
   DotNetHintReferenceMap DotNetHintReferences;
-  typedef std::set<std::string> UsingDirectories;
-  typedef std::map<std::string, UsingDirectories> UsingDirectoriesMap;
+  using UsingDirectories = std::set<std::string>;
+  using UsingDirectoriesMap = std::map<std::string, UsingDirectories>;
   UsingDirectoriesMap AdditionalUsingDirectories;
 
-  typedef std::map<std::string, ToolSources> ToolSourceMap;
+  using ToolSourceMap = std::map<std::string, ToolSources>;
   ToolSourceMap Tools;
   std::string GetCMakeFilePath(const char* name) const;
 };

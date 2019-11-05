@@ -5,15 +5,15 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
-#include "cm_jsoncpp_reader.h"
-#include "cm_jsoncpp_value.h"
-#include "cm_jsoncpp_writer.h"
-
 #include <map>
-#include <memory> // IWYU pragma: keep
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+#include "cm_jsoncpp_reader.h"
+#include "cm_jsoncpp_value.h"
+#include "cm_jsoncpp_writer.h"
 
 class cmake;
 
@@ -35,6 +35,9 @@ public:
       "jsonFile" member specifying a file named with the given prefix
       and holding the original object.  Other JSON types are unchanged.  */
   Json::Value MaybeJsonFile(Json::Value in, std::string const& prefix);
+
+  /** Report file-api capabilities for cmake -E capabilities.  */
+  static Json::Value ReportCapabilities();
 
 private:
   cmake* CMakeInstance;
@@ -161,6 +164,8 @@ private:
 
   static const char* ObjectKindName(ObjectKind kind);
   static std::string ObjectName(Object const& o);
+
+  static Json::Value BuildVersion(unsigned int major, unsigned int minor);
 
   Json::Value BuildObject(Object const& object);
 

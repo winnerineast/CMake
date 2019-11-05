@@ -2,19 +2,20 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmCPackIFWInstaller.h"
 
+#include <cstddef>
+#include <sstream>
+#include <utility>
+
 #include "cmCPackIFWCommon.h"
 #include "cmCPackIFWGenerator.h"
 #include "cmCPackIFWPackage.h"
 #include "cmCPackIFWRepository.h"
 #include "cmCPackLog.h" // IWYU pragma: keep
 #include "cmGeneratedFileStream.h"
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
 #include "cmXMLParser.h"
 #include "cmXMLWriter.h"
-
-#include <sstream>
-#include <stddef.h>
-#include <utility>
 
 cmCPackIFWInstaller::cmCPackIFWInstaller() = default;
 
@@ -152,6 +153,15 @@ void cmCPackIFWInstaller::ConfigureFromOptions()
     }
   }
 
+  // StyleSheet
+  if (const char* option = this->GetOption("CPACK_IFW_PACKAGE_STYLE_SHEET")) {
+    if (cmSystemTools::FileExists(option)) {
+      this->StyleSheet = option;
+    } else {
+      this->printSkippedOptionWarning("CPACK_IFW_PACKAGE_STYLE_SHEET", option);
+    }
+  }
+
   // WizardDefaultWidth
   if (const char* option =
         this->GetOption("CPACK_IFW_PACKAGE_WIZARD_DEFAULT_WIDTH")) {
@@ -183,8 +193,8 @@ void cmCPackIFWInstaller::ConfigureFromOptions()
     this->TargetDir = optIFW_TARGET_DIRECTORY;
   } else if (const char* optPACKAGE_INSTALL_DIRECTORY =
                this->GetOption("CPACK_PACKAGE_INSTALL_DIRECTORY")) {
-    this->TargetDir = "@ApplicationsDir@/";
-    this->TargetDir += optPACKAGE_INSTALL_DIRECTORY;
+    this->TargetDir =
+      cmStrCat("@ApplicationsDir@/", optPACKAGE_INSTALL_DIRECTORY);
   } else {
     this->TargetDir = "@RootDir@/usr/local";
   }
@@ -235,8 +245,7 @@ void cmCPackIFWInstaller::ConfigureFromOptions()
   if (const char* optIFW_PACKAGE_RESOURCES =
         this->GetOption("CPACK_IFW_PACKAGE_RESOURCES")) {
     this->Resources.clear();
-    cmSystemTools::ExpandListArgument(optIFW_PACKAGE_RESOURCES,
-                                      this->Resources);
+    cmExpandList(optIFW_PACKAGE_RESOURCES, this->Resources);
   }
 }
 
@@ -283,7 +292,7 @@ protected:
   {
     if (this->file) {
       std::string content(data, data + length);
-      content = cmSystemTools::TrimWhitespace(content);
+      content = cmTrimWhitespace(content);
       std::string source = this->basePath + "/" + content;
       std::string destination = this->path + "/" + content;
       if (!cmSystemTools::CopyFileIfDifferent(source, destination)) {
@@ -379,6 +388,14 @@ void cmCPackIFWInstaller::GenerateInstallerFile()
   // WizardStyle
   if (!this->WizardStyle.empty()) {
     xout.Element("WizardStyle", this->WizardStyle);
+  }
+
+  // Stylesheet
+  if (!this->StyleSheet.empty()) {
+    std::string name = cmSystemTools::GetFilenameName(this->StyleSheet);
+    std::string path = this->Directory + "/config/" + name;
+    cmsys::SystemTools::CopyFileIfDifferent(this->StyleSheet, path);
+    xout.Element("StyleSheet", name);
   }
 
   // WizardDefaultWidth

@@ -5,10 +5,8 @@
 FindGTK2
 --------
 
-FindGTK2.cmake
-
-This module can find the GTK2 widget libraries and several of its
-other optional components like gtkmm, glade, and glademm.
+Find the GTK2 widget libraries and several of its
+other optional components like ``gtkmm``, ``glade``, and ``glademm``.
 
 NOTE: If you intend to use version checking, CMake 2.6.2 or later is
 
@@ -261,6 +259,7 @@ function(_GTK2_FIND_INCLUDE_DIR _var _hdr)
         gtkmm-2.4
         libglade-2.0
         libglademm-2.4
+        harfbuzz
         pango-1.0
         pangomm-1.4
         sigc++-2.0
@@ -713,6 +712,8 @@ foreach(_GTK2_component ${GTK2_FIND_COMPONENTS})
         _GTK2_FIND_LIBRARY    (PANGO pango false true)
         _GTK2_ADD_TARGET      (PANGO GTK2_DEPENDS gobject glib)
 
+        _GTK2_FIND_INCLUDE_DIR(HARFBUZZ hb.h)
+
         _GTK2_FIND_LIBRARY    (PANGOCAIRO pangocairo false true)
         _GTK2_ADD_TARGET      (PANGOCAIRO GTK2_DEPENDS pango cairo gobject glib)
 
@@ -949,5 +950,5 @@ else()
 endif()
 
 if(GTK2_INCLUDE_DIRS)
-   list(REMOVE_DUPLICATES GTK2_INCLUDE_DIRS)
+  list(REMOVE_DUPLICATES GTK2_INCLUDE_DIRS)
 endif()

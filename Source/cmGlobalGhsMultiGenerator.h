@@ -3,16 +3,15 @@
 #ifndef cmGhsMultiGenerator_h
 #define cmGhsMultiGenerator_h
 
-#include "cmGlobalGenerator.h"
-
-#include "cmGlobalGeneratorFactory.h"
-#include "cmTargetDepend.h"
-
 #include <iosfwd>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "cmGlobalGenerator.h"
+#include "cmGlobalGeneratorFactory.h"
+#include "cmTargetDepend.h"
 
 class cmGeneratorTarget;
 class cmLocalGenerator;
@@ -59,7 +58,8 @@ public:
   static bool SupportsPlatform() { return true; }
 
   // Toolset / Platform Support
-  bool SetGeneratorToolset(std::string const& ts, cmMakefile* mf) override;
+  bool SetGeneratorToolset(std::string const& ts, bool build,
+                           cmMakefile* mf) override;
   bool SetGeneratorPlatform(std::string const& p, cmMakefile* mf) override;
 
   /**
@@ -148,12 +148,11 @@ class cmGlobalGhsMultiGenerator::OrderedTargetDependSet
   : public std::multiset<cmTargetDepend,
                          cmGlobalGhsMultiGenerator::TargetCompare>
 {
-  typedef std::multiset<cmTargetDepend,
-                        cmGlobalGhsMultiGenerator::TargetCompare>
-    derived;
+  using derived =
+    std::multiset<cmTargetDepend, cmGlobalGhsMultiGenerator::TargetCompare>;
 
 public:
-  typedef cmGlobalGenerator::TargetDependSet TargetDependSet;
+  using TargetDependSet = cmGlobalGenerator::TargetDependSet;
   OrderedTargetDependSet(TargetDependSet const&, std::string const& first);
 };
 

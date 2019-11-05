@@ -262,7 +262,7 @@ function(_cpack_nuget_render_spec)
     # NuGet will name it properly.
     _cpack_nuget_debug("Rendering `${CPACK_TEMPORARY_DIRECTORY}/CPack.NuGet.nuspec` file...")
     configure_file(
-        "${CMAKE_ROOT}/Modules/CPack.NuGet.nuspec.in"
+        "${CMAKE_ROOT}/Modules/Internal/CPack/CPack.NuGet.nuspec.in"
         "${CPACK_TEMPORARY_DIRECTORY}/CPack.NuGet.nuspec"
         @ONLY
       )
@@ -276,7 +276,7 @@ function(_cpack_nuget_make_files_tag)
     set(_CPACK_NUGET_FILES_TAG "<files>\n${_files}    </files>" PARENT_SCOPE)
 endfunction()
 
-find_program(NUGET_EXECUTABLE NuGet)
+find_program(NUGET_EXECUTABLE nuget)
 _cpack_nuget_debug_var(NUGET_EXECUTABLE)
 if(NOT NUGET_EXECUTABLE)
     message(FATAL_ERROR "NuGet executable not found")

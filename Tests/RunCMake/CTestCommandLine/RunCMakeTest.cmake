@@ -4,6 +4,16 @@ set(RunCMake_TEST_TIMEOUT 60)
 unset(ENV{CTEST_PARALLEL_LEVEL})
 unset(ENV{CTEST_OUTPUT_ON_FAILURE})
 
+run_cmake_command(repeat-until-pass-bad1
+  ${CMAKE_CTEST_COMMAND} --repeat-until-pass
+  )
+run_cmake_command(repeat-until-pass-bad2
+  ${CMAKE_CTEST_COMMAND} --repeat-until-pass foo
+  )
+run_cmake_command(repeat-until-pass-good
+  ${CMAKE_CTEST_COMMAND} --repeat-until-pass 2
+  )
+
 run_cmake_command(repeat-until-fail-bad1
   ${CMAKE_CTEST_COMMAND} --repeat-until-fail
   )
@@ -14,14 +24,53 @@ run_cmake_command(repeat-until-fail-good
   ${CMAKE_CTEST_COMMAND} --repeat-until-fail 2
   )
 
+run_cmake_command(repeat-after-timeout-bad1
+  ${CMAKE_CTEST_COMMAND} --repeat-after-timeout
+  )
+run_cmake_command(repeat-after-timeout-bad2
+  ${CMAKE_CTEST_COMMAND} --repeat-after-timeout foo
+  )
+run_cmake_command(repeat-after-timeout-good
+  ${CMAKE_CTEST_COMMAND} --repeat-after-timeout 2
+  )
+
+run_cmake_command(repeat-until-pass-and-fail
+  ${CMAKE_CTEST_COMMAND} --repeat-until-pass 2 --repeat-until-fail 2
+  )
+run_cmake_command(repeat-until-fail-and-pass
+  ${CMAKE_CTEST_COMMAND} --repeat-until-fail 2 --repeat-until-pass 2
+  )
+run_cmake_command(repeat-until-fail-and-timeout
+  ${CMAKE_CTEST_COMMAND} --repeat-until-fail 2 --repeat-after-timeout 2
+  )
+
+function(run_repeat_until_pass_tests)
+  # Use a single build tree for a few tests without cleaning.
+  set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/repeat-until-pass-build)
+  run_cmake(repeat-until-pass-cmake)
+  set(RunCMake_TEST_NO_CLEAN 1)
+  run_cmake_command(repeat-until-pass-ctest
+    ${CMAKE_CTEST_COMMAND} -C Debug --repeat-until-pass 3
+    )
+endfunction()
+run_repeat_until_pass_tests()
+
+function(run_repeat_after_timeout_tests)
+  # Use a single build tree for a few tests without cleaning.
+  set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/repeat-after-timeout-build)
+  run_cmake(repeat-after-timeout-cmake)
+  set(RunCMake_TEST_NO_CLEAN 1)
+  run_cmake_command(repeat-after-timeout-ctest
+    ${CMAKE_CTEST_COMMAND} -C Debug --repeat-after-timeout 3
+    )
+endfunction()
+run_repeat_after_timeout_tests()
+
 function(run_repeat_until_fail_tests)
   # Use a single build tree for a few tests without cleaning.
   set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/repeat-until-fail-build)
-  set(RunCMake_TEST_NO_CLEAN 1)
-  file(REMOVE_RECURSE "${RunCMake_TEST_BINARY_DIR}")
-  file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
-
   run_cmake(repeat-until-fail-cmake)
+  set(RunCMake_TEST_NO_CLEAN 1)
   run_cmake_command(repeat-until-fail-ctest
     ${CMAKE_CTEST_COMMAND} -C Debug --repeat-until-fail 3
     )
@@ -77,6 +126,62 @@ set_tests_properties(test4 PROPERTIES LABELS 'bar')
 endfunction()
 
 run_LabelCount()
+
+function(run_RequiredRegexFoundTest)
+  set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/RequiredRegexFound)
+  set(RunCMake_TEST_NO_CLEAN 1)
+  file(REMOVE_RECURSE "${RunCMake_TEST_BINARY_DIR}")
+  file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
+  file(WRITE "${RunCMake_TEST_BINARY_DIR}/CTestTestfile.cmake" "
+add_test(test1 \"${CMAKE_COMMAND}\" -E echo \"test1\")
+set_tests_properties(test1 PROPERTIES PASS_REGULAR_EXPRESSION \"foo;test1;bar\")
+")
+
+  run_cmake_command(RequiredRegexFound ${CMAKE_CTEST_COMMAND} -V)
+endfunction()
+run_RequiredRegexFoundTest()
+
+function(run_RequiredRegexNotFoundTest)
+  set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/RequiredRegexNotFound)
+  set(RunCMake_TEST_NO_CLEAN 1)
+  file(REMOVE_RECURSE "${RunCMake_TEST_BINARY_DIR}")
+  file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
+  file(WRITE "${RunCMake_TEST_BINARY_DIR}/CTestTestfile.cmake" "
+add_test(test1 \"${CMAKE_COMMAND}\" -E echo \"test1\")
+set_tests_properties(test1 PROPERTIES PASS_REGULAR_EXPRESSION \"foo;toast1;bar\" WILL_FAIL True)
+")
+
+  run_cmake_command(RequiredRegexNotFound ${CMAKE_CTEST_COMMAND} -V)
+endfunction()
+run_RequiredRegexNotFoundTest()
+
+function(run_FailRegexFoundTest)
+  set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/FailRegexFound)
+  set(RunCMake_TEST_NO_CLEAN 1)
+  file(REMOVE_RECURSE "${RunCMake_TEST_BINARY_DIR}")
+  file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
+  file(WRITE "${RunCMake_TEST_BINARY_DIR}/CTestTestfile.cmake" "
+add_test(test1 \"${CMAKE_COMMAND}\" -E echo \"test1\")
+set_tests_properties(test1 PROPERTIES FAIL_REGULAR_EXPRESSION \"foo;test1;bar\" WILL_FAIL True)
+")
+
+  run_cmake_command(FailRegexFound ${CMAKE_CTEST_COMMAND} -V)
+endfunction()
+run_FailRegexFoundTest()
+
+function(run_SkipRegexFoundTest)
+  set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/SkipRegexFound)
+  set(RunCMake_TEST_NO_CLEAN 1)
+  file(REMOVE_RECURSE "${RunCMake_TEST_BINARY_DIR}")
+  file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
+  file(WRITE "${RunCMake_TEST_BINARY_DIR}/CTestTestfile.cmake" "
+add_test(test1 \"${CMAKE_COMMAND}\" -E echo \"test1\")
+set_tests_properties(test1 PROPERTIES SKIP_REGULAR_EXPRESSION \"test1\")
+")
+
+  run_cmake_command(SkipRegexFound ${CMAKE_CTEST_COMMAND} -V)
+endfunction()
+run_SkipRegexFoundTest()
 
 function(run_SerialFailed)
   set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/SerialFailed)
@@ -200,7 +305,12 @@ function(run_ShowOnly)
   file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
   file(WRITE "${RunCMake_TEST_BINARY_DIR}/CTestTestfile.cmake" "
     add_test(ShowOnly \"${CMAKE_COMMAND}\" -E echo)
-    set_tests_properties(ShowOnly PROPERTIES WILL_FAIL true _BACKTRACE_TRIPLES \"file1;1;add_test;file0;;\")
+    set_tests_properties(ShowOnly PROPERTIES
+      WILL_FAIL true
+      PROCESSES \"2,threads:2,gpus:4;gpus:2,threads:4\"
+      REQUIRED_FILES RequiredFileDoesNotExist
+      _BACKTRACE_TRIPLES \"file1;1;add_test;file0;;\"
+      )
     add_test(ShowOnlyNotAvailable NOT_AVAILABLE)
 ")
   run_cmake_command(show-only_human ${CMAKE_CTEST_COMMAND} --show-only=human)

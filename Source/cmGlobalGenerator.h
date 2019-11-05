@@ -7,25 +7,29 @@
 
 #include <iosfwd>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "cm_codecvt.hxx"
+
 #include "cmAlgorithms.h"
 #include "cmCustomCommandLines.h"
 #include "cmDuration.h"
-#include "cmExportSetMap.h"
+#include "cmExportSet.h"
 #include "cmStateSnapshot.h"
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
 #include "cmTarget.h"
 #include "cmTargetDepend.h"
-#include "cm_codecvt.hxx"
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
-#  include "cmFileLockPool.h"
+#if !defined(CMAKE_BOOTSTRAP)
 #  include "cm_jsoncpp_value.h"
+
+#  include "cmFileLockPool.h"
 #endif
 
 #define CMAKE_DIRECTORY_ID_SEP "::@"
@@ -67,7 +71,7 @@ struct GeneratedMakeCommand
   void Add(std::vector<std::string>::const_iterator start,
            std::vector<std::string>::const_iterator end)
   {
-    PrimaryCommand.insert(PrimaryCommand.end(), start, end);
+    cmAppend(PrimaryCommand, start, end);
   }
 
   std::string Printable() const { return cmJoin(PrimaryCommand, " "); }
@@ -107,7 +111,7 @@ public:
     return codecvt::None;
   }
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
+#if !defined(CMAKE_BOOTSTRAP)
   /** Get a JSON object describing the generator.  */
   virtual Json::Value GetJson() const;
 #endif
@@ -124,7 +128,8 @@ public:
 
   /** Set the generator-specific toolset name.  Returns true if toolset
       is supported and false otherwise.  */
-  virtual bool SetGeneratorToolset(std::string const& ts, cmMakefile* mf);
+  virtual bool SetGeneratorToolset(std::string const& ts, bool build,
+                                   cmMakefile* mf);
 
   /**
    * Create LocalGenerators and process the CMakeLists files. This does not
@@ -374,7 +379,7 @@ public:
   virtual std::string GetEditCacheCommand() const { return ""; }
 
   // Class to track a set of dependencies.
-  typedef cmTargetDependSet TargetDependSet;
+  using TargetDependSet = cmTargetDependSet;
 
   // what targets does the specified target depend on directly
   // via a target_link_libraries or add_dependencies
@@ -453,14 +458,12 @@ public:
 
   bool GenerateCPackPropertiesFile();
 
-  void CreateEvaluationSourceFiles(std::string const& config) const;
-
   void SetFilenameTargetDepends(
     cmSourceFile* sf, std::set<cmGeneratorTarget const*> const& tgts);
   const std::set<const cmGeneratorTarget*>& GetFilenameTargetDepends(
     cmSourceFile* sf) const;
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
+#if !defined(CMAKE_BOOTSTRAP)
   cmFileLockPool& GetFileLockPool() { return FileLockPool; }
 #endif
 
@@ -474,7 +477,7 @@ public:
   int RecursionDepth;
 
 protected:
-  typedef std::vector<cmLocalGenerator*> GeneratorVector;
+  using GeneratorVector = std::vector<cmLocalGenerator*>;
   // for a project collect all its targets by following depend
   // information, and also collect all the targets
   void GetTargetSets(TargetDependSet& projectTargets,
@@ -499,6 +502,8 @@ protected:
   /// @return true on success
   bool QtAutoGen();
 
+  bool AddAutomaticSources();
+
   std::string SelectMakeProgram(const std::string& makeProgram,
                                 const std::string& makeDefault = "") const;
 
@@ -509,7 +514,7 @@ protected:
   bool IsExcluded(cmStateSnapshot const& root,
                   cmStateSnapshot const& snp) const;
   bool IsExcluded(cmLocalGenerator* root, cmLocalGenerator* gen) const;
-  bool IsExcluded(cmGeneratorTarget* target) const;
+  bool IsExcluded(cmLocalGenerator* root, cmGeneratorTarget* target) const;
   virtual void InitializeProgressMarks() {}
 
   struct GlobalTargetInfo
@@ -553,17 +558,15 @@ protected:
   cmTarget* FindTargetImpl(std::string const& name) const;
 
   cmGeneratorTarget* FindGeneratorTargetImpl(std::string const& name) const;
-  cmGeneratorTarget* FindImportedGeneratorTargetImpl(
-    std::string const& name) const;
 
   const char* GetPredefinedTargetsFolder();
 
 private:
-  typedef std::unordered_map<std::string, cmTarget*> TargetMap;
-  typedef std::unordered_map<std::string, cmGeneratorTarget*>
-    GeneratorTargetMap;
-  typedef std::unordered_map<std::string, cmMakefile*> MakefileMap;
-  typedef std::unordered_map<std::string, cmLocalGenerator*> LocalGeneratorMap;
+  using TargetMap = std::unordered_map<std::string, cmTarget*>;
+  using GeneratorTargetMap =
+    std::unordered_map<std::string, cmGeneratorTarget*>;
+  using MakefileMap = std::unordered_map<std::string, cmMakefile*>;
+  using LocalGeneratorMap = std::unordered_map<std::string, cmLocalGenerator*>;
   // Map efficiently from target name to cmTarget instance.
   // Do not use this structure for looping over all targets.
   // It contains both normal and globally visible imported targets.
@@ -609,6 +612,8 @@ private:
   virtual void ForceLinkerLanguages();
 
   bool CheckTargetsForMissingSources() const;
+  bool CheckTargetsForType() const;
+  bool CheckTargetsForPchCompilePdb() const;
 
   void CreateLocalGenerators();
 
@@ -617,13 +622,13 @@ private:
 
   void ComputeBuildFileGenerators();
 
-  cmExternalMakefileProjectGenerator* ExtraGenerator;
+  std::unique_ptr<cmExternalMakefileProjectGenerator> ExtraGenerator;
 
   // track files replaced during a Generate
   std::vector<std::string> FilesReplacedDuringGenerate;
 
   // Store computed inter-target dependencies.
-  typedef std::map<cmGeneratorTarget const*, TargetDependSet> TargetDependMap;
+  using TargetDependMap = std::map<cmGeneratorTarget const*, TargetDependSet>;
   TargetDependMap TargetDependencies;
 
   friend class cmake;
@@ -662,7 +667,7 @@ private:
   mutable std::map<cmSourceFile*, std::set<cmGeneratorTarget const*>>
     FilenameTargetDepends;
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
+#if !defined(CMAKE_BOOTSTRAP)
   // Pool of file locks
   cmFileLockPool FileLockPool;
 #endif

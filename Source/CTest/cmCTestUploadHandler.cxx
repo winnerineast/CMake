@@ -2,13 +2,13 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmCTestUploadHandler.h"
 
+#include <ostream>
+#include <string>
+
 #include "cmCTest.h"
 #include "cmGeneratedFileStream.h"
 #include "cmVersion.h"
 #include "cmXMLWriter.h"
-
-#include <ostream>
-#include <string>
 
 cmCTestUploadHandler::cmCTestUploadHandler()
 {
@@ -51,7 +51,7 @@ int cmCTestUploadHandler::ProcessHandler()
                   this->CTest->GetTestModelString());
   xml.Attribute("Name", this->CTest->GetCTestConfiguration("Site"));
   xml.Attribute("Generator",
-                std::string("ctest") + cmVersion::GetCMakeVersion());
+                std::string("ctest-") + cmVersion::GetCMakeVersion());
   this->CTest->AddSiteProperties(xml);
   xml.StartElement("Upload");
 

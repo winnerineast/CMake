@@ -5,13 +5,13 @@
 FindLAPACK
 ----------
 
-Find LAPACK library
+Find Linear Algebra PACKage (LAPACK) library
 
 This module finds an installed fortran library that implements the
 LAPACK linear-algebra interface (see http://www.netlib.org/lapack/).
 
 The approach follows that taken for the autoconf macro file,
-acx_lapack.m4 (distributed at
+``acx_lapack.m4`` (distributed at
 http://ac-archive.sourceforge.net/ac-archive/acx_lapack.html).
 
 Input Variables
@@ -174,7 +174,11 @@ if(_libraries_work)
 endif()
 
  if(_libraries_work)
-   set(${LIBRARIES} ${${LIBRARIES}} ${_blas} ${_threads})
+   if("${_list}" STREQUAL "")
+     set(${LIBRARIES} "${LIBRARIES}-PLACEHOLDER-FOR-EMPTY-LIBRARIES")
+   else()
+     set(${LIBRARIES} ${${LIBRARIES}} ${_blas} ${_threads})
+   endif()
  else()
     set(${LIBRARIES} FALSE)
  endif()
@@ -206,6 +210,7 @@ if(BLAS_FOUND)
 
 #intel lapack
 if (BLA_VENDOR MATCHES "Intel" OR BLA_VENDOR STREQUAL "All")
+  if(NOT LAPACK_LIBRARIES)
   if (NOT WIN32)
     set(LAPACK_mkl_LM "-lm")
     set(LAPACK_mkl_LDL "-ldl")
@@ -280,6 +285,7 @@ if (BLA_VENDOR MATCHES "Intel" OR BLA_VENDOR STREQUAL "All")
     unset(LAPACK_mkl_LM)
     unset(LAPACK_mkl_LDL)
   endif ()
+  endif()
 endif()
 
 if (BLA_VENDOR STREQUAL "Goto" OR BLA_VENDOR STREQUAL "All")
@@ -325,25 +331,25 @@ if (BLA_VENDOR STREQUAL "FLAME" OR BLA_VENDOR STREQUAL "All")
 endif ()
 
 #acml lapack
- if (BLA_VENDOR MATCHES "ACML" OR BLA_VENDOR STREQUAL "All")
-   if (BLAS_LIBRARIES MATCHES ".+acml.+")
-     set (LAPACK_LIBRARIES ${BLAS_LIBRARIES})
-   endif ()
- endif ()
+if (BLA_VENDOR MATCHES "ACML" OR BLA_VENDOR STREQUAL "All")
+  if (BLAS_LIBRARIES MATCHES ".+acml.+")
+    set (LAPACK_LIBRARIES ${BLAS_LIBRARIES})
+  endif ()
+endif ()
 
 # Apple LAPACK library?
 if (BLA_VENDOR STREQUAL "Apple" OR BLA_VENDOR STREQUAL "All")
- if(NOT LAPACK_LIBRARIES)
-  check_lapack_libraries(
-  LAPACK_LIBRARIES
-  LAPACK
-  cheev
-  ""
-  "Accelerate"
-  "${BLAS_LIBRARIES}"
-  ""
-  )
- endif()
+  if(NOT LAPACK_LIBRARIES)
+    check_lapack_libraries(
+    LAPACK_LIBRARIES
+    LAPACK
+    cheev
+    ""
+    "Accelerate"
+    "${BLAS_LIBRARIES}"
+    ""
+    )
+  endif()
 endif ()
 if (BLA_VENDOR STREQUAL "NAS" OR BLA_VENDOR STREQUAL "All")
   if ( NOT LAPACK_LIBRARIES )
@@ -380,50 +386,56 @@ else()
 endif()
 
 if(BLA_F95)
- if(LAPACK95_LIBRARIES)
-  set(LAPACK95_FOUND TRUE)
- else()
-  set(LAPACK95_FOUND FALSE)
- endif()
- if(NOT LAPACK_FIND_QUIETLY)
-  if(LAPACK95_FOUND)
-    message(STATUS "A library with LAPACK95 API found.")
+  if(LAPACK95_LIBRARIES)
+    set(LAPACK95_FOUND TRUE)
   else()
-    if(LAPACK_FIND_REQUIRED)
-      message(FATAL_ERROR
-      "A required library with LAPACK95 API not found. Please specify library location."
-      )
+    set(LAPACK95_FOUND FALSE)
+  endif()
+  if(NOT LAPACK_FIND_QUIETLY)
+    if(LAPACK95_FOUND)
+      message(STATUS "A library with LAPACK95 API found.")
     else()
-      message(STATUS
-      "A library with LAPACK95 API not found. Please specify library location."
-      )
+      if(LAPACK_FIND_REQUIRED)
+        message(FATAL_ERROR
+        "A required library with LAPACK95 API not found. Please specify library location."
+        )
+      else()
+        message(STATUS
+        "A library with LAPACK95 API not found. Please specify library location."
+        )
+      endif()
     endif()
   endif()
- endif()
- set(LAPACK_FOUND "${LAPACK95_FOUND}")
- set(LAPACK_LIBRARIES "${LAPACK95_LIBRARIES}")
+  set(LAPACK_FOUND "${LAPACK95_FOUND}")
+  set(LAPACK_LIBRARIES "${LAPACK95_LIBRARIES}")
 else()
- if(LAPACK_LIBRARIES)
-  set(LAPACK_FOUND TRUE)
- else()
-  set(LAPACK_FOUND FALSE)
- endif()
-
- if(NOT LAPACK_FIND_QUIETLY)
-  if(LAPACK_FOUND)
-    message(STATUS "A library with LAPACK API found.")
+  if(LAPACK_LIBRARIES)
+    set(LAPACK_FOUND TRUE)
   else()
-    if(LAPACK_FIND_REQUIRED)
-      message(FATAL_ERROR
-      "A required library with LAPACK API not found. Please specify library location."
-      )
+    set(LAPACK_FOUND FALSE)
+  endif()
+
+  if(NOT LAPACK_FIND_QUIETLY)
+    if(LAPACK_FOUND)
+      message(STATUS "A library with LAPACK API found.")
     else()
-      message(STATUS
-      "A library with LAPACK API not found. Please specify library location."
-      )
+      if(LAPACK_FIND_REQUIRED)
+        message(FATAL_ERROR
+        "A required library with LAPACK API not found. Please specify library location."
+        )
+      else()
+        message(STATUS
+        "A library with LAPACK API not found. Please specify library location."
+        )
+      endif()
     endif()
   endif()
- endif()
+endif()
+
+# On compilers that implicitly link LAPACK (such as ftn, cc, and CC on Cray HPC machines)
+# we used a placeholder for empty LAPACK_LIBRARIES to get through our logic above.
+if (LAPACK_LIBRARIES STREQUAL "LAPACK_LIBRARIES-PLACEHOLDER-FOR-EMPTY-LIBRARIES")
+  set(LAPACK_LIBRARIES "")
 endif()
 
 cmake_pop_check_state()

@@ -29,7 +29,7 @@ cmInstallScriptGenerator::cmInstallScriptGenerator(const char* script,
 
 cmInstallScriptGenerator::~cmInstallScriptGenerator() = default;
 
-void cmInstallScriptGenerator::Compute(cmLocalGenerator* lg)
+bool cmInstallScriptGenerator::Compute(cmLocalGenerator* lg)
 {
   this->LocalGenerator = lg;
 
@@ -49,6 +49,8 @@ void cmInstallScriptGenerator::Compute(cmLocalGenerator* lg)
         break;
     }
   }
+
+  return true;
 }
 
 void cmInstallScriptGenerator::AddScriptInstallRule(std::ostream& os,
@@ -76,11 +78,9 @@ void cmInstallScriptGenerator::GenerateScriptForConfig(
   std::ostream& os, const std::string& config, Indent indent)
 {
   if (this->AllowGenex) {
-    cmGeneratorExpression ge;
-    std::unique_ptr<cmCompiledGeneratorExpression> cge =
-      ge.Parse(this->Script);
     this->AddScriptInstallRule(os, indent,
-                               cge->Evaluate(this->LocalGenerator, config));
+                               cmGeneratorExpression::Evaluate(
+                                 this->Script, this->LocalGenerator, config));
   } else {
     this->AddScriptInstallRule(os, indent, this->Script);
   }

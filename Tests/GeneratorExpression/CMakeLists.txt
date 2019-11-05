@@ -86,7 +86,7 @@ add_custom_target(check-part1 ALL
     -Dtest_colons_4=$<1:C:\\CMake>
     -Dtest_colons_5=$<1:C:/CMake>
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check-part1.cmake
-  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 1 of 4)"
+  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 1 of 5)"
   VERBATIM
   )
 
@@ -157,7 +157,7 @@ add_custom_target(check-part2 ALL
     -Dtest_arbitrary_content_comma_9=$<1:a,,b,,>
     -Dtest_arbitrary_content_comma_10=$<1:,,a,,b,,>
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check-part2.cmake
-  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 2 of 4)"
+  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 2 of 5)"
   VERBATIM
 )
 
@@ -220,6 +220,7 @@ add_custom_target(check-part3 ALL
     -Dtest_early_termination_2=$<$<1:>:,
     -Dsystem_name=${CMAKE_HOST_SYSTEM_NAME}
     -Dtest_platform_id=$<PLATFORM_ID>
+    -Dtest_platform_id_supported=$<PLATFORM_ID:Linux,Windows,Darwin>
     -Dtest_platform_id_Linux=$<PLATFORM_ID:Linux>
     -Dtest_platform_id_Windows=$<PLATFORM_ID:Windows>
     -Dtest_platform_id_Darwin=$<PLATFORM_ID:Darwin>
@@ -250,7 +251,7 @@ add_custom_target(check-part3 ALL
     -Dequal22=$<EQUAL:10,-012>
     -Dequal23=$<EQUAL:-10,-012>
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check-part3.cmake
-  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 3 of 4)"
+  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 3 of 5)"
   VERBATIM
   )
 
@@ -276,7 +277,27 @@ add_custom_target(check-part4 ALL
     -DWIN32=${WIN32}
     -DCMAKE_GENERATOR=${CMAKE_GENERATOR}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check-part4.cmake
-  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 4 of 4)"
+  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 4 of 5)"
+  VERBATIM
+  )
+
+add_custom_target(check-part5 ALL
+  COMMAND ${CMAKE_COMMAND} -E echo "check done (part 5 of 5)"
+  DEPENDS check-part5.stamp
+  VERBATIM
+  )
+
+add_custom_command(
+  OUTPUT check-part5.stamp
+  DEPENDS $<FILTER:file.foo.bar,EXCLUDE,\\.foo\\.bar$>
+  COMMAND ${CMAKE_COMMAND} -E sleep 0
+  VERBATIM
+  )
+set_property(SOURCE check-part5.stamp PROPERTY SYMBOLIC 1)
+
+add_custom_command(
+  OUTPUT file.foo.bar
+  COMMAND ${CMAKE_COMMAND} -P check-part5.cmake
   VERBATIM
   )
 
@@ -373,5 +394,50 @@ if(NOT CMAKE_GENERATOR STREQUAL Xcode OR NOT CMAKE_OSX_ARCHITECTURES MATCHES "[;
       -DEXPECTED_NUM_OBJECTFILES=2
       -P "${CMAKE_CURRENT_SOURCE_DIR}/check_object_files.cmake"
     DEPENDS objlib
+  )
+
+
+  add_library(sharedlib SHARED objlib1.c objlib2.c)
+  file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sharedlib_files_$<CONFIGURATION>"
+    CONTENT "$<JOIN:$<TARGET_OBJECTS:sharedlib>,\n>\n"
+  )
+
+  add_custom_target(check_sharedlib_objs ALL
+    COMMAND ${CMAKE_COMMAND}
+      "-DOBJLIB_LISTFILE=${CMAKE_CURRENT_BINARY_DIR}/sharedlib_files_$<CONFIGURATION>"
+      -DEXPECTED_NUM_OBJECTFILES=2
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/check_object_files.cmake"
+    DEPENDS sharedlib
+  )
+
+
+  add_library(staticlib STATIC objlib1.c objlib2.c)
+  file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/staticlib_files_$<CONFIGURATION>"
+    CONTENT "$<JOIN:$<TARGET_OBJECTS:staticlib>,\n>\n"
+  )
+
+  add_custom_target(check_staticlib_objs ALL
+    COMMAND ${CMAKE_COMMAND}
+      "-DOBJLIB_LISTFILE=${CMAKE_CURRENT_BINARY_DIR}/staticlib_files_$<CONFIGURATION>"
+      -DEXPECTED_NUM_OBJECTFILES=2
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/check_object_files.cmake"
+    DEPENDS staticlib
+  )
+
+
+  add_executable(execobjs objlib1.c objlib2.c echo.c)
+  file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/execobjs_files_$<CONFIGURATION>"
+    CONTENT "$<JOIN:$<TARGET_OBJECTS:execobjs>,\n>\n"
+  )
+
+  add_custom_target(check_exec_objs ALL
+    COMMAND ${CMAKE_COMMAND}
+      "-DOBJLIB_LISTFILE=${CMAKE_CURRENT_BINARY_DIR}/execobjs_files_$<CONFIGURATION>"
+      -DEXPECTED_NUM_OBJECTFILES=3
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/check_object_files.cmake"
+    DEPENDS execobjs
   )
 endif()

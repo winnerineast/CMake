@@ -77,6 +77,9 @@ else()
     # IAR does not detect language automatically
     "--c++"
     "--ec++"
+
+    # ARMClang need target options
+    "--target=arm-arm-none-eabi -mcpu=cortex-m3"
     )
 endif()
 
@@ -106,7 +109,6 @@ if(NOT CMAKE_CXX_COMPILER_ID_RUN)
 
   include(${CMAKE_ROOT}/Modules/CMakeDetermineCompilerId.cmake)
   CMAKE_DETERMINE_COMPILER_ID(CXX CXXFLAGS CMakeCXXCompilerId.cpp)
-  CMAKE_DIAGNOSE_UNSUPPORTED_CLANG(CXX CXX)
 
   # Set old compiler and platform id variables.
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -116,6 +118,22 @@ if(NOT CMAKE_CXX_COMPILER_ID_RUN)
     set(CMAKE_COMPILER_IS_MINGW 1)
   elseif(CMAKE_CXX_PLATFORM_ID MATCHES "Cygwin")
     set(CMAKE_COMPILER_IS_CYGWIN 1)
+  endif()
+else()
+  if(NOT DEFINED CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+    # Some toolchain files set our internal CMAKE_CXX_COMPILER_ID_RUN
+    # variable but are not aware of CMAKE_CXX_COMPILER_FRONTEND_VARIANT.
+    # They pre-date our support for the GNU-like variant targeting the
+    # MSVC ABI so we do not consider that here.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      if("x${CMAKE_CXX_SIMULATE_ID}" STREQUAL "xMSVC")
+        set(CMAKE_CXX_COMPILER_FRONTEND_VARIANT "MSVC")
+      else()
+        set(CMAKE_CXX_COMPILER_FRONTEND_VARIANT "GNU")
+      endif()
+    else()
+      set(CMAKE_CXX_COMPILER_FRONTEND_VARIANT "")
+    endif()
   endif()
 endif()
 

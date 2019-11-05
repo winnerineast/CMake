@@ -5,11 +5,11 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
-#include "cmCPackIFWCommon.h"
-
 #include <map>
 #include <string>
 #include <vector>
+
+#include "cmCPackIFWCommon.h"
 
 class cmCPackIFWPackage;
 class cmCPackIFWRepository;
@@ -22,8 +22,8 @@ class cmCPackIFWInstaller : public cmCPackIFWCommon
 public:
   // Types
 
-  typedef std::map<std::string, cmCPackIFWPackage*> PackagesMap;
-  typedef std::vector<cmCPackIFWRepository*> RepositoriesVector;
+  using PackagesMap = std::map<std::string, cmCPackIFWPackage*>;
+  using RepositoriesVector = std::vector<cmCPackIFWRepository*>;
 
 public:
   // Constructor
@@ -71,6 +71,9 @@ public:
 
   /// Wizard style name
   std::string WizardStyle;
+
+  /// Filename for a style sheet
+  std::string StyleSheet;
 
   /// Wizard width
   std::string WizardDefaultWidth;

@@ -2,12 +2,12 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmGeneratorExpressionEvaluator.h"
 
+#include <algorithm>
+#include <sstream>
+
 #include "cmAlgorithms.h"
 #include "cmGeneratorExpressionContext.h"
 #include "cmGeneratorExpressionNode.h"
-
-#include <algorithm>
-#include <sstream>
 
 GeneratorExpressionContent::GeneratorExpressionContent(
   const char* startContent, size_t length)
@@ -30,9 +30,7 @@ std::string GeneratorExpressionContent::ProcessArbitraryContent(
 {
   std::string result;
 
-  const std::vector<
-    std::vector<cmGeneratorExpressionEvaluator*>>::const_iterator pend =
-    this->ParamChildren.end();
+  const auto pend = this->ParamChildren.end();
   for (; pit != pend; ++pit) {
     for (cmGeneratorExpressionEvaluator* pExprEval : *pit) {
       if (node->RequiresLiteralInput()) {
@@ -116,11 +114,8 @@ std::string GeneratorExpressionContent::EvaluateParameters(
 {
   const int numExpected = node->NumExpectedParameters();
   {
-    std::vector<std::vector<cmGeneratorExpressionEvaluator*>>::const_iterator
-      pit = this->ParamChildren.begin();
-    const std::vector<
-      std::vector<cmGeneratorExpressionEvaluator*>>::const_iterator pend =
-      this->ParamChildren.end();
+    auto pit = this->ParamChildren.begin();
+    const auto pend = this->ParamChildren.end();
     const bool acceptsArbitraryContent =
       node->AcceptsArbitraryContentParameter();
     int counter = 1;
@@ -166,9 +161,13 @@ std::string GeneratorExpressionContent::EvaluateParameters(
     reportError(context, this->GetOriginalExpression(),
                 "$<" + identifier +
                   "> expression requires at least one parameter.");
-  }
-  if (numExpected == cmGeneratorExpressionNode::OneOrZeroParameters &&
-      parameters.size() > 1) {
+  } else if (numExpected == cmGeneratorExpressionNode::TwoOrMoreParameters &&
+             parameters.size() < 2) {
+    reportError(context, this->GetOriginalExpression(),
+                "$<" + identifier +
+                  "> expression requires at least two parameters.");
+  } else if (numExpected == cmGeneratorExpressionNode::OneOrZeroParameters &&
+             parameters.size() > 1) {
     reportError(context, this->GetOriginalExpression(),
                 "$<" + identifier +
                   "> expression requires one or zero parameters.");

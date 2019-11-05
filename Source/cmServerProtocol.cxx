@@ -2,26 +2,29 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmServerProtocol.h"
 
+#include <algorithm>
+#include <cassert>
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <cm/memory>
+
+#include "cm_uv.h"
+
 #include "cmAlgorithms.h"
 #include "cmExternalMakefileProjectGenerator.h"
 #include "cmFileMonitor.h"
 #include "cmGlobalGenerator.h"
 #include "cmJsonObjectDictionary.h"
 #include "cmJsonObjects.h"
+#include "cmMessageType.h"
 #include "cmServer.h"
 #include "cmServerDictionary.h"
 #include "cmState.h"
 #include "cmSystemTools.h"
-#include "cm_uv.h"
 #include "cmake.h"
-
-#include <algorithm>
-#include <cassert>
-#include <functional>
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
 
 // Get rid of some windows macros:
 #undef max
@@ -165,7 +168,7 @@ bool cmServerProtocol::DoActivate(const cmServerRequest& /*request*/,
 
 std::pair<int, int> cmServerProtocol1::ProtocolVersion() const
 {
-  return std::make_pair(1, 2);
+  return { 1, 2 };
 }
 
 static void setErrorMessage(std::string* errorMessage, const std::string& text)
@@ -377,8 +380,7 @@ void cmServerProtocol1::HandleCMakeFileChanges(const std::string& path,
   SendSignal(kFILE_CHANGE_SIGNAL, obj);
 }
 
-const cmServerResponse cmServerProtocol1::Process(
-  const cmServerRequest& request)
+cmServerResponse cmServerProtocol1::Process(const cmServerRequest& request)
 {
   assert(this->m_State >= STATE_ACTIVE);
 
@@ -433,7 +435,7 @@ cmServerResponse cmServerProtocol1::ProcessCache(
     keys = allKeys;
   } else {
     for (auto const& i : keys) {
-      if (std::find(allKeys.begin(), allKeys.end(), i) == allKeys.end()) {
+      if (!cmContains(allKeys, i)) {
         return request.ReportError("Key \"" + i + "\" not found in cache.");
       }
     }
@@ -600,6 +602,10 @@ cmServerResponse cmServerProtocol1::ProcessConfigure(
   }
 
   int ret = cm->Configure();
+  cm->IssueMessage(
+    MessageType::DEPRECATION_WARNING,
+    "The 'cmake-server(7)' is deprecated.  "
+    "Please port clients to use the 'cmake-file-api(7)' instead.");
   if (ret < 0) {
     return request.ReportError("Configuration failed.");
   }
@@ -625,7 +631,7 @@ cmServerResponse cmServerProtocol1::ProcessGlobalSettings(
   Json::Value obj = Json::objectValue;
 
   // Capabilities information:
-  obj[kCAPABILITIES_KEY] = cm->ReportCapabilitiesJson(true);
+  obj[kCAPABILITIES_KEY] = cm->ReportCapabilitiesJson();
 
   obj[kDEBUG_OUTPUT_KEY] = cm->GetDebugOutput();
   obj[kTRACE_KEY] = cm->GetTrace();

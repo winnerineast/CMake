@@ -200,6 +200,30 @@ Options
  from the top of a binary tree for a CMake project it will dump
  additional information such as the cache, log files etc.
 
+``--log-level=<ERROR|WARNING|NOTICE|STATUS|VERBOSE|DEBUG|TRACE>``
+ Set the log level.
+
+ The :command:`message` command will only output messages of the specified
+ log level or higher.  The default log level is ``STATUS``.
+
+ To make a log level persist between CMake runs, set
+ :variable:`CMAKE_MESSAGE_LOG_LEVEL` as a cache variable instead.
+ If both the command line option and the variable are given, the command line
+ option takes precedence.
+
+ For backward compatibility reasons, ``--loglevel`` is also accepted as a
+ synonym for this option.
+
+``--log-context``
+ Enable the :command:`message` command outputting context attached to each
+ message.
+
+ This option turns on showing context for the current CMake run only.
+ To make showing the context persistent for all subsequent CMake runs, set
+ :variable:`CMAKE_MESSAGE_CONTEXT_SHOW` as a cache variable instead.
+ When this command line option is given, :variable:`CMAKE_MESSAGE_CONTEXT_SHOW`
+ is ignored.
+
 ``--debug-trycompile``
  Do not delete the :command:`try_compile` build tree.
  Only useful on one :command:`try_compile` at a time.
@@ -231,6 +255,9 @@ Options
  Put cmake in trace mode, but output only lines of a specified file.
 
  Multiple options are allowed.
+
+``--trace-redirect=<file>``
+ Put cmake in trace mode and redirect trace output to a file instead of stderr.
 
 ``--warn-uninitialized``
  Warn about uninitialized values.
@@ -280,8 +307,12 @@ following options:
   The :envvar:`CMAKE_BUILD_PARALLEL_LEVEL` environment variable, if set,
   specifies a default parallel level when this option is not given.
 
+  Some native build tools always build in parallel.  The use of ``<jobs>``
+  value of ``1`` can be used to limit to a single job.
+
 ``--target <tgt>..., -t <tgt>...``
-  Build ``<tgt>`` instead of default targets.  May be specified multiple times.
+  Build ``<tgt>`` instead of the default target.  Multiple targets may be
+  given, separated by spaces.
 
 ``--config <cfg>``
   For multi-configuration tools, choose configuration ``<cfg>``.
@@ -324,16 +355,16 @@ The options are:
   Project binary directory to install. This is required and must be first.
 
 ``--config <cfg>``
-  For multi-configuration tools, choose configuration ``<cfg>``.
+  For multi-configuration generators, choose configuration ``<cfg>``.
 
 ``--component <comp>``
   Component-based install. Only install component ``<comp>``.
 
 ``--prefix <prefix>``
-  The installation prefix :variable:`CMAKE_INSTALL_PREFIX`.
+  Override the installation prefix, :variable:`CMAKE_INSTALL_PREFIX`.
 
 ``--strip``
-  Strip before installing by setting ``CMAKE_INSTALL_DO_STRIP``.
+  Strip before installing.
 
 ``-v, --verbose``
   Enable verbose output.
@@ -414,6 +445,22 @@ Available commands are:
       A list of strings with all the extra generators compatible with
       the generator.
 
+  ``fileApi``
+    Optional member that is present when the :manual:`cmake-file-api(7)`
+    is available.  The value is a JSON object with one member:
+
+    ``requests``
+      A JSON array containing zero or more supported file-api requests.
+      Each request is a JSON object with members:
+
+      ``kind``
+        Specifies one of the supported :ref:`file-api object kinds`.
+
+      ``version``
+        A JSON array whose elements are each a JSON object containing
+        ``major`` and ``minor`` members specifying non-negative integer
+        version components.
+
   ``serverMode``
     ``true`` if cmake supports server-mode and ``false`` otherwise.
 
@@ -433,7 +480,7 @@ Available commands are:
   but the files or directories it point to.
 
 ``copy_directory <dir>... <destination>``
-  Copy directories to ``<destination>`` directory.
+  Copy content of ``<dir>...`` directories to ``<destination>`` directory.
   If ``<destination>`` directory does not exist it will be created.
   ``copy_directory`` does follow symlinks.
 
@@ -443,6 +490,12 @@ Available commands are:
   If multiple files are specified, the ``<destination>`` must be
   directory and it must exist.
   ``copy_if_different`` does follow symlinks.
+
+``create_symlink <old> <new>``
+  Create a symbolic link ``<new>`` naming ``<old>``.
+
+  .. note::
+    Path to where ``<new>`` symbolic link will be created has to exist beforehand.
 
 ``echo [<string>...]``
   Displays arguments as text.
@@ -455,6 +508,9 @@ Available commands are:
 
 ``environment``
   Display the current environment variables.
+
+``false``
+  Do nothing, with an exit code of 1.
 
 ``make_directory <dir>...``
   Create ``<dir>`` directories.  If necessary, create parent
@@ -505,9 +561,10 @@ Available commands are:
   ``remove`` does not follow symlinks. That means it remove only symlinks
   and not files it point to.
 
-``remove_directory <dir>``
-  Remove a directory and its contents.  If a directory does
-  not exist it will be silently ignored.
+``remove_directory <dir>...``
+  Remove ``<dir>`` directories and their contents.  If a directory does
+  not exist it will be silently ignored.  If ``<dir>`` is a symlink to
+  a directory, just the symlink will be removed.
 
 ``rename <oldname> <newname>``
   Rename a file or directory (on one volume). If file with the ``<newname>`` name
@@ -519,16 +576,22 @@ Available commands are:
 ``sleep <number>...``
   Sleep for given number of seconds.
 
-``tar [cxt][vf][zjJ] file.tar [<options>] [--] [<file>...]``
+``tar [cxt][vf][zjJ] file.tar [<options>] [--] [<pathname>...]``
   Create or extract a tar or zip archive.  Options are:
 
   ``c``
     Create a new archive containing the specified files.
-    If used, the <file> argument is mandatory.
+    If used, the ``<pathname>...`` argument is mandatory.
   ``x``
     Extract to disk from the archive.
+    The ``<pathname>...`` argument could be used to extract only selected files
+    or directories.
+    When extracting selected files or directories, you must provide their exact
+    names including the path, as printed by list (``-t``).
   ``t``
-    List archive contents to stdout.
+    List archive contents.
+    The ``<pathname>...`` argument could be used to list only selected files
+    or directories.
   ``v``
     Produce verbose output.
   ``z``
@@ -537,20 +600,23 @@ Available commands are:
     Compress the resulting archive with bzip2.
   ``J``
     Compress the resulting archive with XZ.
-  ``--``
-    Stop interpreting options and treat all remaining arguments
-    as file names even if they start in ``-``.
+  ``--zstd``
+    Compress the resulting archive with Zstandard.
   ``--files-from=<file>``
     Read file names from the given file, one per line.
     Blank lines are ignored.  Lines may not start in ``-``
     except for ``--add-file=<name>`` to add files whose
     names start in ``-``.
-  ``--mtime=<date>``
-    Specify modification time recorded in tarball entries.
   ``--format=<format>``
     Specify the format of the archive to be created.
     Supported formats are: ``7zip``, ``gnutar``, ``pax``,
     ``paxr`` (restricted pax, default), and ``zip``.
+  ``--mtime=<date>``
+    Specify modification time recorded in tarball entries.
+  ``--``
+    Stop interpreting options and treat all remaining arguments
+    as file names, even if they start with ``-``.
+
 
 ``time <command> [<args>...]``
   Run command and display elapsed time.
@@ -563,11 +629,8 @@ Available commands are:
   Touch a file if it exists but do not create it.  If a file does
   not exist it will be silently ignored.
 
-``create_symlink <old> <new>``
-  Create a symbolic link ``<new>`` naming ``<old>``.
-
-.. note::
-  Path to where ``<new>`` symbolic link will be created has to exist beforehand.
+``true``
+  Do nothing, with an exit code of 0.
 
 Windows-specific Command-Line Tools
 -----------------------------------

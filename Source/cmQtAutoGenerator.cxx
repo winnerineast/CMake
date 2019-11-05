@@ -1,24 +1,14 @@
 /* Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmQtAutoGenerator.h"
-#include "cmQtAutoGen.h"
 
 #include "cmsys/FStream.hxx"
 
-#include "cmAlgorithms.h"
-#include "cmGlobalGenerator.h"
-#include "cmMakefile.h"
-#include "cmState.h"
-#include "cmStateDirectory.h"
-#include "cmStateSnapshot.h"
+#include "cm_jsoncpp_reader.h"
+
+#include "cmQtAutoGen.h"
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
-#include "cmake.h"
-
-#include <algorithm>
-#include <sstream>
-#include <utility>
-
-// -- Class methods
 
 cmQtAutoGenerator::Logger::Logger()
 {
@@ -27,11 +17,11 @@ cmQtAutoGenerator::Logger::Logger()
     std::string verbose;
     if (cmSystemTools::GetEnv("VERBOSE", verbose) && !verbose.empty()) {
       unsigned long iVerbose = 0;
-      if (cmSystemTools::StringToULong(verbose.c_str(), &iVerbose)) {
+      if (cmStrToULong(verbose, &iVerbose)) {
         SetVerbosity(static_cast<unsigned int>(iVerbose));
       } else {
         // Non numeric verbosity
-        SetVerbose(cmSystemTools::IsOn(verbose));
+        SetVerbose(cmIsOn(verbose));
       }
     }
   }
@@ -39,7 +29,7 @@ cmQtAutoGenerator::Logger::Logger()
     std::string colorEnv;
     cmSystemTools::GetEnv("COLOR", colorEnv);
     if (!colorEnv.empty()) {
-      SetColorOutput(cmSystemTools::IsOn(colorEnv));
+      SetColorOutput(cmIsOn(colorEnv));
     } else {
       SetColorOutput(true);
     }
@@ -48,13 +38,10 @@ cmQtAutoGenerator::Logger::Logger()
 
 cmQtAutoGenerator::Logger::~Logger() = default;
 
-void cmQtAutoGenerator::Logger::RaiseVerbosity(std::string const& value)
+void cmQtAutoGenerator::Logger::RaiseVerbosity(unsigned int value)
 {
-  unsigned long verbosity = 0;
-  if (cmSystemTools::StringToULong(value.c_str(), &verbosity)) {
-    if (this->Verbosity_ < verbosity) {
-      this->Verbosity_ = static_cast<unsigned int>(verbosity);
-    }
+  if (this->Verbosity_ < value) {
+    this->Verbosity_ = value;
   }
 }
 
@@ -63,23 +50,16 @@ void cmQtAutoGenerator::Logger::SetColorOutput(bool value)
   ColorOutput_ = value;
 }
 
-std::string cmQtAutoGenerator::Logger::HeadLine(std::string const& title)
+std::string cmQtAutoGenerator::Logger::HeadLine(cm::string_view title)
 {
-  std::string head = title;
-  head += '\n';
-  head.append(head.size() - 1, '-');
-  head += '\n';
-  return head;
+  return cmStrCat(title, '\n', std::string(title.size(), '-'), '\n');
 }
 
-void cmQtAutoGenerator::Logger::Info(GenT genType, std::string const& message)
+void cmQtAutoGenerator::Logger::Info(GenT genType,
+                                     cm::string_view message) const
 {
-  std::string msg = GeneratorName(genType);
-  msg += ": ";
-  msg += message;
-  if (msg.back() != '\n') {
-    msg.push_back('\n');
-  }
+  std::string msg = cmStrCat(GeneratorName(genType), ": ", message,
+                             cmHasSuffix(message, '\n') ? "" : "\n");
   {
     std::lock_guard<std::mutex> lock(Mutex_);
     cmSystemTools::Stdout(msg);
@@ -87,93 +67,46 @@ void cmQtAutoGenerator::Logger::Info(GenT genType, std::string const& message)
 }
 
 void cmQtAutoGenerator::Logger::Warning(GenT genType,
-                                        std::string const& message)
+                                        cm::string_view message) const
 {
   std::string msg;
   if (message.find('\n') == std::string::npos) {
     // Single line message
-    msg += GeneratorName(genType);
-    msg += " warning: ";
+    msg = cmStrCat(GeneratorName(genType), " warning: ", message,
+                   cmHasSuffix(message, '\n') ? "\n" : "\n\n");
   } else {
     // Multi line message
-    msg += HeadLine(GeneratorName(genType) + " warning");
+    msg = cmStrCat(HeadLine(cmStrCat(GeneratorName(genType), " warning")),
+                   message, cmHasSuffix(message, '\n') ? "\n" : "\n\n");
   }
-  // Message
-  msg += message;
-  if (msg.back() != '\n') {
-    msg.push_back('\n');
-  }
-  msg.push_back('\n');
   {
     std::lock_guard<std::mutex> lock(Mutex_);
     cmSystemTools::Stdout(msg);
   }
 }
 
-void cmQtAutoGenerator::Logger::WarningFile(GenT genType,
-                                            std::string const& filename,
-                                            std::string const& message)
+void cmQtAutoGenerator::Logger::Error(GenT genType,
+                                      cm::string_view message) const
 {
-  std::string msg = "  ";
-  msg += Quoted(filename);
-  msg.push_back('\n');
-  // Message
-  msg += message;
-  Warning(genType, msg);
-}
-
-void cmQtAutoGenerator::Logger::Error(GenT genType, std::string const& message)
-{
-  std::string msg;
-  msg += HeadLine(GeneratorName(genType) + " error");
-  // Message
-  msg += message;
-  if (msg.back() != '\n') {
-    msg.push_back('\n');
-  }
-  msg.push_back('\n');
+  std::string msg =
+    cmStrCat('\n', HeadLine(cmStrCat(GeneratorName(genType), " error")),
+             message, cmHasSuffix(message, '\n') ? "\n" : "\n\n");
   {
     std::lock_guard<std::mutex> lock(Mutex_);
     cmSystemTools::Stderr(msg);
   }
 }
 
-void cmQtAutoGenerator::Logger::ErrorFile(GenT genType,
-                                          std::string const& filename,
-                                          std::string const& message)
-{
-  std::string emsg = "  ";
-  emsg += Quoted(filename);
-  emsg += '\n';
-  // Message
-  emsg += message;
-  Error(genType, emsg);
-}
-
 void cmQtAutoGenerator::Logger::ErrorCommand(
-  GenT genType, std::string const& message,
-  std::vector<std::string> const& command, std::string const& output)
+  GenT genType, cm::string_view message,
+  std::vector<std::string> const& command, std::string const& output) const
 {
-  std::string msg;
-  msg.push_back('\n');
-  msg += HeadLine(GeneratorName(genType) + " subprocess error");
-  msg += message;
-  if (msg.back() != '\n') {
-    msg.push_back('\n');
-  }
-  msg.push_back('\n');
-  msg += HeadLine("Command");
-  msg += QuotedCommand(command);
-  if (msg.back() != '\n') {
-    msg.push_back('\n');
-  }
-  msg.push_back('\n');
-  msg += HeadLine("Output");
-  msg += output;
-  if (msg.back() != '\n') {
-    msg.push_back('\n');
-  }
-  msg.push_back('\n');
+  std::string msg = cmStrCat(
+    '\n', HeadLine(cmStrCat(GeneratorName(genType), " subprocess error")),
+    message, cmHasSuffix(message, '\n') ? "\n" : "\n\n");
+  msg += cmStrCat(HeadLine("Command"), QuotedCommand(command), "\n\n");
+  msg += cmStrCat(HeadLine("Output"), output,
+                  cmHasSuffix(output, '\n') ? "\n" : "\n\n");
   {
     std::lock_guard<std::mutex> lock(Mutex_);
     cmSystemTools::Stderr(msg);
@@ -197,7 +130,7 @@ bool cmQtAutoGenerator::FileRead(std::string& content,
   content.clear();
   if (!cmSystemTools::FileExists(filename, true)) {
     if (error != nullptr) {
-      error->append("Not a file.");
+      *error = "Not a file.";
     }
     return false;
   }
@@ -209,17 +142,17 @@ bool cmQtAutoGenerator::FileRead(std::string& content,
   return [&ifs, length, &content, error]() -> bool {
     if (!ifs) {
       if (error != nullptr) {
-        error->append("Opening the file for reading failed.");
+        *error = "Opening the file for reading failed.";
       }
       return false;
     }
     content.reserve(length);
-    typedef std::istreambuf_iterator<char> IsIt;
+    using IsIt = std::istreambuf_iterator<char>;
     content.assign(IsIt{ ifs }, IsIt{});
     if (!ifs) {
       content.clear();
       if (error != nullptr) {
-        error->append("Reading from the file failed.");
+        *error = "Reading from the file failed.";
       }
       return false;
     }
@@ -234,7 +167,7 @@ bool cmQtAutoGenerator::FileWrite(std::string const& filename,
   // Make sure the parent directory exists
   if (!cmQtAutoGenerator::MakeParentDirectory(filename)) {
     if (error != nullptr) {
-      error->assign("Could not create parent directory.");
+      *error = "Could not create parent directory.";
     }
     return false;
   }
@@ -246,14 +179,14 @@ bool cmQtAutoGenerator::FileWrite(std::string const& filename,
   return [&ofs, &content, error]() -> bool {
     if (!ofs) {
       if (error != nullptr) {
-        error->assign("Opening file for writing failed.");
+        *error = "Opening file for writing failed.";
       }
       return false;
     }
     ofs << content;
     if (!ofs.good()) {
       if (error != nullptr) {
-        error->assign("File writing failed.");
+        *error = "File writing failed.";
       }
       return false;
     }
@@ -261,454 +194,299 @@ bool cmQtAutoGenerator::FileWrite(std::string const& filename,
   }();
 }
 
-cmQtAutoGenerator::FileSystem::FileSystem() = default;
-
-cmQtAutoGenerator::FileSystem::~FileSystem() = default;
-
-std::string cmQtAutoGenerator::FileSystem::GetRealPath(
-  std::string const& filename)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::GetRealPath(filename);
-}
-
-std::string cmQtAutoGenerator::FileSystem::CollapseFullPath(
-  std::string const& file, std::string const& dir)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::CollapseFullPath(file, dir);
-}
-
-void cmQtAutoGenerator::FileSystem::SplitPath(
-  const std::string& p, std::vector<std::string>& components,
-  bool expand_home_dir)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  cmSystemTools::SplitPath(p, components, expand_home_dir);
-}
-
-std::string cmQtAutoGenerator::FileSystem::JoinPath(
-  const std::vector<std::string>& components)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::JoinPath(components);
-}
-
-std::string cmQtAutoGenerator::FileSystem::JoinPath(
-  std::vector<std::string>::const_iterator first,
-  std::vector<std::string>::const_iterator last)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::JoinPath(first, last);
-}
-
-std::string cmQtAutoGenerator::FileSystem::GetFilenameWithoutLastExtension(
-  const std::string& filename)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::GetFilenameWithoutLastExtension(filename);
-}
-
-std::string cmQtAutoGenerator::FileSystem::SubDirPrefix(
-  std::string const& filename)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmQtAutoGen::SubDirPrefix(filename);
-}
-
-void cmQtAutoGenerator::FileSystem::setupFilePathChecksum(
-  std::string const& currentSrcDir, std::string const& currentBinDir,
-  std::string const& projectSrcDir, std::string const& projectBinDir)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  FilePathChecksum_.setupParentDirs(currentSrcDir, currentBinDir,
-                                    projectSrcDir, projectBinDir);
-}
-
-std::string cmQtAutoGenerator::FileSystem::GetFilePathChecksum(
-  std::string const& filename)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return FilePathChecksum_.getPart(filename);
-}
-
-bool cmQtAutoGenerator::FileSystem::FileExists(std::string const& filename)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::FileExists(filename);
-}
-
-bool cmQtAutoGenerator::FileSystem::FileExists(std::string const& filename,
-                                               bool isFile)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::FileExists(filename, isFile);
-}
-
-unsigned long cmQtAutoGenerator::FileSystem::FileLength(
-  std::string const& filename)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::FileLength(filename);
-}
-
-bool cmQtAutoGenerator::FileSystem::FileIsOlderThan(
-  std::string const& buildFile, std::string const& sourceFile,
-  std::string* error)
-{
-  bool res(false);
-  int result = 0;
-  {
-    std::lock_guard<std::mutex> lock(Mutex_);
-    res = cmSystemTools::FileTimeCompare(buildFile, sourceFile, &result);
-  }
-  if (res) {
-    res = (result < 0);
-  } else {
-    if (error != nullptr) {
-      error->append(
-        "File modification time comparison failed for the files\n  ");
-      error->append(Quoted(buildFile));
-      error->append("\nand\n  ");
-      error->append(Quoted(sourceFile));
-    }
-  }
-  return res;
-}
-
-bool cmQtAutoGenerator::FileSystem::FileRead(std::string& content,
-                                             std::string const& filename,
-                                             std::string* error)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmQtAutoGenerator::FileRead(content, filename, error);
-}
-
-bool cmQtAutoGenerator::FileSystem::FileWrite(std::string const& filename,
-                                              std::string const& content,
-                                              std::string* error)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmQtAutoGenerator::FileWrite(filename, content, error);
-}
-
-bool cmQtAutoGenerator::FileSystem::FileDiffers(std::string const& filename,
-                                                std::string const& content)
+bool cmQtAutoGenerator::FileDiffers(std::string const& filename,
+                                    std::string const& content)
 {
   bool differs = true;
-  {
-    std::string oldContents;
-    if (FileRead(oldContents, filename)) {
-      differs = (oldContents != content);
-    }
+  std::string oldContents;
+  if (FileRead(oldContents, filename) && (oldContents == content)) {
+    differs = false;
   }
   return differs;
 }
 
-bool cmQtAutoGenerator::FileSystem::FileRemove(std::string const& filename)
+cmQtAutoGenerator::cmQtAutoGenerator(GenT genType)
+  : GenType_(genType)
 {
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::RemoveFile(filename);
 }
-
-bool cmQtAutoGenerator::FileSystem::Touch(std::string const& filename,
-                                          bool create)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::Touch(filename, create);
-}
-
-bool cmQtAutoGenerator::FileSystem::MakeDirectory(std::string const& dirname)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmSystemTools::MakeDirectory(dirname);
-}
-
-bool cmQtAutoGenerator::FileSystem::MakeParentDirectory(
-  std::string const& filename)
-{
-  std::lock_guard<std::mutex> lock(Mutex_);
-  return cmQtAutoGenerator::MakeParentDirectory(filename);
-}
-
-int cmQtAutoGenerator::ReadOnlyProcessT::PipeT::init(uv_loop_t* uv_loop,
-                                                     ReadOnlyProcessT* process)
-{
-  Process_ = process;
-  Target_ = nullptr;
-  return UVPipe_.init(*uv_loop, 0, this);
-}
-
-int cmQtAutoGenerator::ReadOnlyProcessT::PipeT::startRead(std::string* target)
-{
-  Target_ = target;
-  return uv_read_start(uv_stream(), &PipeT::UVAlloc, &PipeT::UVData);
-}
-
-void cmQtAutoGenerator::ReadOnlyProcessT::PipeT::reset()
-{
-  Process_ = nullptr;
-  Target_ = nullptr;
-  UVPipe_.reset();
-  Buffer_.clear();
-  Buffer_.shrink_to_fit();
-}
-
-void cmQtAutoGenerator::ReadOnlyProcessT::PipeT::UVAlloc(uv_handle_t* handle,
-                                                         size_t suggestedSize,
-                                                         uv_buf_t* buf)
-{
-  auto& pipe = *reinterpret_cast<PipeT*>(handle->data);
-  pipe.Buffer_.resize(suggestedSize);
-  buf->base = pipe.Buffer_.data();
-  buf->len = pipe.Buffer_.size();
-}
-
-void cmQtAutoGenerator::ReadOnlyProcessT::PipeT::UVData(uv_stream_t* stream,
-                                                        ssize_t nread,
-                                                        const uv_buf_t* buf)
-{
-  auto& pipe = *reinterpret_cast<PipeT*>(stream->data);
-  if (nread > 0) {
-    // Append data to merged output
-    if ((buf->base != nullptr) && (pipe.Target_ != nullptr)) {
-      pipe.Target_->append(buf->base, nread);
-    }
-  } else if (nread < 0) {
-    // EOF or error
-    auto* proc = pipe.Process_;
-    // Check it this an unusual error
-    if (nread != UV_EOF) {
-      if (!proc->Result()->error()) {
-        proc->Result()->ErrorMessage =
-          "libuv reading from pipe failed with error code ";
-        proc->Result()->ErrorMessage += std::to_string(nread);
-      }
-    }
-    // Clear libuv pipe handle and try to finish
-    pipe.reset();
-    proc->UVTryFinish();
-  }
-}
-
-void cmQtAutoGenerator::ProcessResultT::reset()
-{
-  ExitStatus = 0;
-  TermSignal = 0;
-  if (!StdOut.empty()) {
-    StdOut.clear();
-    StdOut.shrink_to_fit();
-  }
-  if (!StdErr.empty()) {
-    StdErr.clear();
-    StdErr.shrink_to_fit();
-  }
-  if (!ErrorMessage.empty()) {
-    ErrorMessage.clear();
-    ErrorMessage.shrink_to_fit();
-  }
-}
-
-void cmQtAutoGenerator::ReadOnlyProcessT::setup(
-  ProcessResultT* result, bool mergedOutput,
-  std::vector<std::string> const& command, std::string const& workingDirectory)
-{
-  Setup_.WorkingDirectory = workingDirectory;
-  Setup_.Command = command;
-  Setup_.Result = result;
-  Setup_.MergedOutput = mergedOutput;
-}
-
-static std::string getUVError(const char* prefixString, int uvErrorCode)
-{
-  std::ostringstream ost;
-  ost << prefixString << ": " << uv_strerror(uvErrorCode);
-  return ost.str();
-}
-
-bool cmQtAutoGenerator::ReadOnlyProcessT::start(
-  uv_loop_t* uv_loop, std::function<void()>&& finishedCallback)
-{
-  if (IsStarted() || (Result() == nullptr)) {
-    return false;
-  }
-
-  // Reset result before the start
-  Result()->reset();
-
-  // Fill command string pointers
-  if (!Setup().Command.empty()) {
-    CommandPtr_.reserve(Setup().Command.size() + 1);
-    for (std::string const& arg : Setup().Command) {
-      CommandPtr_.push_back(arg.c_str());
-    }
-    CommandPtr_.push_back(nullptr);
-  } else {
-    Result()->ErrorMessage = "Empty command";
-  }
-
-  if (!Result()->error()) {
-    if (UVPipeOut_.init(uv_loop, this) != 0) {
-      Result()->ErrorMessage = "libuv stdout pipe initialization failed";
-    }
-  }
-  if (!Result()->error()) {
-    if (UVPipeErr_.init(uv_loop, this) != 0) {
-      Result()->ErrorMessage = "libuv stderr pipe initialization failed";
-    }
-  }
-  if (!Result()->error()) {
-    // -- Setup process stdio options
-    // stdin
-    UVOptionsStdIO_[0].flags = UV_IGNORE;
-    UVOptionsStdIO_[0].data.stream = nullptr;
-    // stdout
-    UVOptionsStdIO_[1].flags =
-      static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
-    UVOptionsStdIO_[1].data.stream = UVPipeOut_.uv_stream();
-    // stderr
-    UVOptionsStdIO_[2].flags =
-      static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
-    UVOptionsStdIO_[2].data.stream = UVPipeErr_.uv_stream();
-
-    // -- Setup process options
-    std::fill_n(reinterpret_cast<char*>(&UVOptions_), sizeof(UVOptions_), 0);
-    UVOptions_.exit_cb = &ReadOnlyProcessT::UVExit;
-    UVOptions_.file = CommandPtr_[0];
-    UVOptions_.args = const_cast<char**>(CommandPtr_.data());
-    UVOptions_.cwd = Setup_.WorkingDirectory.c_str();
-    UVOptions_.flags = UV_PROCESS_WINDOWS_HIDE;
-    UVOptions_.stdio_count = static_cast<int>(UVOptionsStdIO_.size());
-    UVOptions_.stdio = UVOptionsStdIO_.data();
-
-    // -- Spawn process
-    int uvErrorCode = UVProcess_.spawn(*uv_loop, UVOptions_, this);
-    if (uvErrorCode != 0) {
-      Result()->ErrorMessage =
-        getUVError("libuv process spawn failed ", uvErrorCode);
-    }
-  }
-  // -- Start reading from stdio streams
-  if (!Result()->error()) {
-    if (UVPipeOut_.startRead(&Result()->StdOut) != 0) {
-      Result()->ErrorMessage = "libuv start reading from stdout pipe failed";
-    }
-  }
-  if (!Result()->error()) {
-    if (UVPipeErr_.startRead(Setup_.MergedOutput ? &Result()->StdOut
-                                                 : &Result()->StdErr) != 0) {
-      Result()->ErrorMessage = "libuv start reading from stderr pipe failed";
-    }
-  }
-
-  if (!Result()->error()) {
-    IsStarted_ = true;
-    FinishedCallback_ = std::move(finishedCallback);
-  } else {
-    // Clear libuv handles and finish
-    UVProcess_.reset();
-    UVPipeOut_.reset();
-    UVPipeErr_.reset();
-    CommandPtr_.clear();
-  }
-
-  return IsStarted();
-}
-
-void cmQtAutoGenerator::ReadOnlyProcessT::UVExit(uv_process_t* handle,
-                                                 int64_t exitStatus,
-                                                 int termSignal)
-{
-  auto& proc = *reinterpret_cast<ReadOnlyProcessT*>(handle->data);
-  if (proc.IsStarted() && !proc.IsFinished()) {
-    // Set error message on demand
-    proc.Result()->ExitStatus = exitStatus;
-    proc.Result()->TermSignal = termSignal;
-    if (!proc.Result()->error()) {
-      if (termSignal != 0) {
-        proc.Result()->ErrorMessage = "Process was terminated by signal ";
-        proc.Result()->ErrorMessage +=
-          std::to_string(proc.Result()->TermSignal);
-      } else if (exitStatus != 0) {
-        proc.Result()->ErrorMessage = "Process failed with return value ";
-        proc.Result()->ErrorMessage +=
-          std::to_string(proc.Result()->ExitStatus);
-      }
-    }
-
-    // Reset process handle and try to finish
-    proc.UVProcess_.reset();
-    proc.UVTryFinish();
-  }
-}
-
-void cmQtAutoGenerator::ReadOnlyProcessT::UVTryFinish()
-{
-  // There still might be data in the pipes after the process has finished.
-  // Therefore check if the process is finished AND all pipes are closed
-  // before signaling the worker thread to continue.
-  if (UVProcess_.get() == nullptr) {
-    if (UVPipeOut_.uv_pipe() == nullptr) {
-      if (UVPipeErr_.uv_pipe() == nullptr) {
-        IsFinished_ = true;
-        FinishedCallback_();
-      }
-    }
-  }
-}
-
-cmQtAutoGenerator::cmQtAutoGenerator() = default;
 
 cmQtAutoGenerator::~cmQtAutoGenerator() = default;
 
-bool cmQtAutoGenerator::Run(std::string const& infoFile,
-                            std::string const& config)
+bool cmQtAutoGenerator::InfoT::Read(std::istream& istr)
 {
-  // Info settings
-  InfoFile_ = infoFile;
-  cmSystemTools::ConvertToUnixSlashes(InfoFile_);
-  InfoDir_ = cmSystemTools::GetFilenamePath(infoFile);
-  InfoConfig_ = config;
-
-  bool success = false;
-  {
-    cmake cm(cmake::RoleScript, cmState::Unknown);
-    cm.SetHomeOutputDirectory(InfoDir());
-    cm.SetHomeDirectory(InfoDir());
-    cm.GetCurrentSnapshot().SetDefaultDefinitions();
-    cmGlobalGenerator gg(&cm);
-
-    cmStateSnapshot snapshot = cm.GetCurrentSnapshot();
-    snapshot.GetDirectory().SetCurrentBinary(InfoDir());
-    snapshot.GetDirectory().SetCurrentSource(InfoDir());
-
-    auto makefile = cm::make_unique<cmMakefile>(&gg, snapshot);
-    // The OLD/WARN behavior for policy CMP0053 caused a speed regression.
-    // https://gitlab.kitware.com/cmake/cmake/issues/17570
-    makefile->SetPolicyVersion("3.9", std::string());
-    gg.SetCurrentMakefile(makefile.get());
-    success = this->Init(makefile.get());
+  try {
+    istr >> Json_;
+  } catch (...) {
+    return false;
   }
-  if (success) {
-    success = this->Process();
-  }
-  return success;
+  return true;
 }
 
-std::string cmQtAutoGenerator::SettingsFind(std::string const& content,
-                                            const char* key)
+bool cmQtAutoGenerator::InfoT::GetJsonArray(std::vector<std::string>& list,
+                                            Json::Value const& jval)
 {
-  std::string prefix(key);
-  prefix += ':';
-  std::string::size_type pos = content.find(prefix);
-  if (pos != std::string::npos) {
+  Json::ArrayIndex const arraySize = jval.size();
+  if (arraySize == 0) {
+    return false;
+  }
+
+  bool picked = false;
+  list.reserve(list.size() + arraySize);
+  for (Json::ArrayIndex ii = 0; ii != arraySize; ++ii) {
+    Json::Value const& ival = jval[ii];
+    if (ival.isString()) {
+      list.emplace_back(ival.asString());
+      picked = true;
+    }
+  }
+  return picked;
+}
+
+bool cmQtAutoGenerator::InfoT::GetJsonArray(
+  std::unordered_set<std::string>& list, Json::Value const& jval)
+{
+  Json::ArrayIndex const arraySize = jval.size();
+  if (arraySize == 0) {
+    return false;
+  }
+
+  bool picked = false;
+  list.reserve(list.size() + arraySize);
+  for (Json::ArrayIndex ii = 0; ii != arraySize; ++ii) {
+    Json::Value const& ival = jval[ii];
+    if (ival.isString()) {
+      list.emplace(ival.asString());
+      picked = true;
+    }
+  }
+  return picked;
+}
+
+std::string cmQtAutoGenerator::InfoT::ConfigKey(cm::string_view key) const
+{
+  return cmStrCat(key, '_', Gen_.InfoConfig());
+}
+
+bool cmQtAutoGenerator::InfoT::GetString(std::string const& key,
+                                         std::string& value,
+                                         bool required) const
+{
+  Json::Value const& jval = Json_[key];
+  if (!jval.isString()) {
+    if (!jval.isNull() || required) {
+      return LogError(cmStrCat(key, " is not a string."));
+    }
+  } else {
+    value = jval.asString();
+    if (value.empty() && required) {
+      return LogError(cmStrCat(key, " is empty."));
+    }
+  }
+  return true;
+}
+
+bool cmQtAutoGenerator::InfoT::GetStringConfig(std::string const& key,
+                                               std::string& value,
+                                               bool required) const
+{
+  { // Try config
+    std::string const configKey = ConfigKey(key);
+    Json::Value const& jval = Json_[configKey];
+    if (!jval.isNull()) {
+      if (!jval.isString()) {
+        return LogError(cmStrCat(configKey, " is not a string."));
+      }
+      value = jval.asString();
+      if (required && value.empty()) {
+        return LogError(cmStrCat(configKey, " is empty."));
+      }
+      return true;
+    }
+  }
+  // Try plain
+  return GetString(key, value, required);
+}
+
+bool cmQtAutoGenerator::InfoT::GetBool(std::string const& key, bool& value,
+                                       bool required) const
+{
+  Json::Value const& jval = Json_[key];
+  if (jval.isBool()) {
+    value = jval.asBool();
+  } else {
+    if (!jval.isNull() || required) {
+      return LogError(cmStrCat(key, " is not a boolean."));
+    }
+  }
+  return true;
+}
+
+bool cmQtAutoGenerator::InfoT::GetUInt(std::string const& key,
+                                       unsigned int& value,
+                                       bool required) const
+{
+  Json::Value const& jval = Json_[key];
+  if (jval.isUInt()) {
+    value = jval.asUInt();
+  } else {
+    if (!jval.isNull() || required) {
+      return LogError(cmStrCat(key, " is not an unsigned integer."));
+    }
+  }
+  return true;
+}
+
+bool cmQtAutoGenerator::InfoT::GetArray(std::string const& key,
+                                        std::vector<std::string>& list,
+                                        bool required) const
+{
+  Json::Value const& jval = Json_[key];
+  if (!jval.isArray()) {
+    if (!jval.isNull() || required) {
+      return LogError(cmStrCat(key, " is not an array."));
+    }
+  }
+  return GetJsonArray(list, jval) || !required;
+}
+
+bool cmQtAutoGenerator::InfoT::GetArray(std::string const& key,
+                                        std::unordered_set<std::string>& list,
+                                        bool required) const
+{
+  Json::Value const& jval = Json_[key];
+  if (!jval.isArray()) {
+    if (!jval.isNull() || required) {
+      return LogError(cmStrCat(key, " is not an array."));
+    }
+  }
+  return GetJsonArray(list, jval) || !required;
+}
+
+bool cmQtAutoGenerator::InfoT::GetArrayConfig(std::string const& key,
+                                              std::vector<std::string>& list,
+                                              bool required) const
+{
+  { // Try config
+    std::string const configKey = ConfigKey(key);
+    Json::Value const& jval = Json_[configKey];
+    if (!jval.isNull()) {
+      if (!jval.isArray()) {
+        return LogError(cmStrCat(configKey, " is not an array string."));
+      }
+      if (!GetJsonArray(list, jval) && required) {
+        return LogError(cmStrCat(configKey, " is empty."));
+      }
+      return true;
+    }
+  }
+  // Try plain
+  return GetArray(key, list, required);
+}
+
+bool cmQtAutoGenerator::InfoT::LogError(GenT genType,
+                                        cm::string_view message) const
+{
+  Gen_.Log().Error(genType,
+                   cmStrCat("Info error in info file\n",
+                            Quoted(Gen_.InfoFile()), ":\n", message));
+  return false;
+}
+
+bool cmQtAutoGenerator::InfoT::LogError(cm::string_view message) const
+{
+  return LogError(Gen_.GenType_, message);
+}
+
+std::string cmQtAutoGenerator::SettingsFind(cm::string_view content,
+                                            cm::string_view key)
+{
+  cm::string_view res;
+  std::string const prefix = cmStrCat(key, ':');
+  cm::string_view::size_type pos = content.find(prefix);
+  if (pos != cm::string_view::npos) {
     pos += prefix.size();
     if (pos < content.size()) {
-      std::string::size_type posE = content.find('\n', pos);
-      if ((posE != std::string::npos) && (posE != pos)) {
-        return content.substr(pos, posE - pos);
+      cm::string_view::size_type posE = content.find('\n', pos);
+      if ((posE != cm::string_view::npos) && (posE != pos)) {
+        res = content.substr(pos, posE - pos);
       }
     }
   }
-  return std::string();
+  return std::string(res);
+}
+
+std::string cmQtAutoGenerator::MessagePath(cm::string_view path) const
+{
+  std::string res;
+  if (cmHasPrefix(path, ProjectDirs().Source)) {
+    res = cmStrCat("SRC:", path.substr(ProjectDirs().Source.size()));
+  } else if (cmHasPrefix(path, ProjectDirs().Binary)) {
+    res = cmStrCat("BIN:", path.substr(ProjectDirs().Binary.size()));
+  } else {
+    res = std::string(path);
+  }
+  return cmQtAutoGen::Quoted(res);
+}
+
+bool cmQtAutoGenerator::Run(cm::string_view infoFile, cm::string_view config)
+{
+  // Info config
+  InfoConfig_ = std::string(config);
+
+  // Info file
+  InfoFile_ = std::string(infoFile);
+  cmSystemTools::CollapseFullPath(InfoFile_);
+  InfoDir_ = cmSystemTools::GetFilenamePath(InfoFile_);
+
+  // Load info file time
+  if (!InfoFileTime_.Load(InfoFile_)) {
+    cmSystemTools::Stderr(cmStrCat("AutoGen: The info file ",
+                                   Quoted(InfoFile_), " is not readable\n"));
+    return false;
+  }
+
+  {
+    InfoT info(*this);
+
+    // Read info file
+    {
+      cmsys::ifstream ifs(InfoFile_.c_str(),
+                          (std::ios::in | std::ios::binary));
+      if (!ifs) {
+        Log().Error(
+          GenType_,
+          cmStrCat("Could not to open info file ", Quoted(InfoFile_)));
+        return false;
+      }
+      if (!info.Read(ifs)) {
+        Log().Error(GenType_,
+                    cmStrCat("Could not read info file ", Quoted(InfoFile_)));
+        return false;
+      }
+    }
+
+    // -- Read common info settings
+    {
+      unsigned int verbosity = 0;
+      // Info: setup project directories
+      if (!info.GetUInt("VERBOSITY", verbosity, false) ||
+          !info.GetString("CMAKE_SOURCE_DIR", ProjectDirs_.Source, true) ||
+          !info.GetString("CMAKE_BINARY_DIR", ProjectDirs_.Binary, true) ||
+          !info.GetString("CMAKE_CURRENT_SOURCE_DIR",
+                          ProjectDirs_.CurrentSource, true) ||
+          !info.GetString("CMAKE_CURRENT_BINARY_DIR",
+                          ProjectDirs_.CurrentBinary, true)) {
+        return false;
+      }
+      Logger_.RaiseVerbosity(verbosity);
+    }
+
+    // -- Call virtual init from info method.
+    if (!this->InitFromInfo(info)) {
+      return false;
+    }
+  }
+
+  // Call virtual process method.
+  return this->Process();
 }

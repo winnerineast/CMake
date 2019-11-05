@@ -5,16 +5,16 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
-#include "cmDuration.h"
-#include "cmProcessOutput.h"
-
 #include <chrono>
+#include <ctime>
 #include <map>
-#include <memory> // IWYU pragma: keep
+#include <memory>
 #include <sstream>
 #include <string>
-#include <time.h>
 #include <vector>
+
+#include "cmDuration.h"
+#include "cmProcessOutput.h"
 
 class cmCTestBuildHandler;
 class cmCTestBuildAndTestHandler;
@@ -41,7 +41,7 @@ class cmXMLWriter;
 class cmCTest
 {
 public:
-  typedef cmProcessOutput::Encoding Encoding;
+  using Encoding = cmProcessOutput::Encoding;
   /** Enumerate parts of the testing and submission process.  */
   enum Part
   {
@@ -404,9 +404,9 @@ public:
 
   std::vector<std::string>& GetInitialCommandLineArguments();
 
-  /** Set the track to submit to */
-  void SetSpecificTrack(const char* track);
-  const char* GetSpecificTrack();
+  /** Set the group to submit to */
+  void SetSpecificGroup(const char* group);
+  const char* GetSpecificGroup();
 
   void SetFailover(bool failover);
   bool GetFailover() const;
@@ -433,8 +433,14 @@ public:
   /** Return the number of times a test should be run */
   int GetTestRepeat() const;
 
-  /** Return true if test should run until fail */
-  bool GetRepeatUntilFail() const;
+  enum class Rerun
+  {
+    Never,
+    UntilFail,
+    UntilPass,
+    AfterTimeout,
+  };
+  Rerun GetRerunMode() const;
 
   void GenerateSubprojectsOutput(cmXMLWriter& xml);
   std::vector<std::string> GetLabelsForSubprojects();

@@ -120,7 +120,7 @@ add_RunCMake_test(CMP0081)
 # CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS variable, which both the VS and Xcode
 # generators ignore.  The policy will have no effect on those generators.
 if(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
-  add_RunCMake_test(CMP0065)
+  add_RunCMake_test(CMP0065 -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME})
 endif()
 if(CMAKE_GENERATOR MATCHES "Make")
   add_RunCMake_test(Make -DMAKE_IS_GNU=${MAKE_IS_GNU})
@@ -167,7 +167,7 @@ if(UNIX AND "${CMAKE_GENERATOR}" MATCHES "Unix Makefiles|Ninja")
   add_RunCMake_test(CompilerChange)
 endif()
 add_RunCMake_test(CompilerNotFound)
-add_RunCMake_test(Configure)
+add_RunCMake_test(Configure -DMSVC_IDE=${MSVC_IDE})
 add_RunCMake_test(DisallowedCommands)
 add_RunCMake_test(ExternalData)
 add_RunCMake_test(FeatureSummary)
@@ -189,19 +189,25 @@ add_RunCMake_test(GeneratorToolset)
 add_RunCMake_test(GetPrerequisites)
 add_RunCMake_test(GNUInstallDirs -DSYSTEM_NAME=${CMAKE_SYSTEM_NAME})
 add_RunCMake_test(GoogleTest) # Note: does not actually depend on Google Test
+add_RunCMake_test(Graphviz)
 add_RunCMake_test(TargetPropertyGeneratorExpressions)
 add_RunCMake_test(Languages)
 add_RunCMake_test(LinkStatic)
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(Cray|PGI|XL|XLClang)$")
   add_RunCMake_test(MetaCompileFeatures)
 endif()
+if(MSVC)
+  add_RunCMake_test(MSVCRuntimeLibrary)
+  add_RunCMake_test(MSVCWarningFlags)
+endif()
 add_RunCMake_test(ObjectLibrary)
 add_RunCMake_test(ParseImplicitIncludeInfo)
+add_RunCMake_test(ParseImplicitLinkInfo)
 if(UNIX AND CMAKE_SHARED_LIBRARY_RUNTIME_C_FLAG AND CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF")
   add_RunCMake_test(RuntimePath)
 endif()
 add_RunCMake_test(ScriptMode)
-add_RunCMake_test(Swift)
+add_RunCMake_test(Swift -DCMAKE_Swift_COMPILER=${CMAKE_Swift_COMPILER})
 add_RunCMake_test(TargetObjects)
 add_RunCMake_test(TargetSources)
 add_RunCMake_test(ToolchainFile)
@@ -244,7 +250,8 @@ add_RunCMake_test(export)
 add_RunCMake_test(cmake_minimum_required)
 add_RunCMake_test(cmake_parse_arguments)
 add_RunCMake_test(continue)
-add_RunCMake_test(ctest_build)
+add_executable(color_warning color_warning.c)
+add_RunCMake_test(ctest_build -DCOLOR_WARNING=$<TARGET_FILE:color_warning>)
 add_RunCMake_test(ctest_cmake_error)
 add_RunCMake_test(ctest_configure)
 if(COVERAGE_COMMAND)
@@ -255,6 +262,7 @@ add_RunCMake_test(ctest_submit)
 add_RunCMake_test(ctest_test)
 add_RunCMake_test(ctest_disabled_test)
 add_RunCMake_test(ctest_skipped_test)
+add_RunCMake_test(ctest_update)
 add_RunCMake_test(ctest_upload)
 add_RunCMake_test(ctest_fixtures)
 add_RunCMake_test(file)
@@ -328,6 +336,44 @@ add_RunCMake_test(no_install_prefix)
 add_RunCMake_test(configure_file)
 add_RunCMake_test(CTestTimeoutAfterMatch)
 
+# cthwalloc links against CMakeLib and CTestLib, which means it can't be built
+# if CMake_TEST_EXTERNAL_CMAKE is activated (the compiler might be different.)
+# So, it has to be provided in the original build tree.
+if(CMake_TEST_EXTERNAL_CMAKE)
+  set(no_package_root_path)
+  if(NOT CMAKE_VERSION VERSION_LESS 3.12)
+    set(no_package_root_path NO_PACKAGE_ROOT_PATH)
+  endif()
+  find_program(cthwalloc cthwalloc PATHS ${CMake_TEST_EXTERNAL_CMAKE}
+    NO_DEFAULT_PATH
+    ${no_package_root_path}
+    NO_CMAKE_PATH
+    NO_CMAKE_ENVIRONMENT_PATH
+    NO_SYSTEM_ENVIRONMENT_PATH
+    NO_CMAKE_SYSTEM_PATH
+    NO_CMAKE_FIND_ROOT_PATH
+    )
+  if(cthwalloc)
+    add_executable(cthwalloc IMPORTED)
+    set_property(TARGET cthwalloc PROPERTY IMPORTED_LOCATION ${cthwalloc})
+  endif()
+else()
+  add_executable(cthwalloc CTestHardwareAllocation/cthwalloc.cxx)
+  target_link_libraries(cthwalloc CTestLib)
+  target_include_directories(cthwalloc PRIVATE
+    ${CMake_BINARY_DIR}/Source
+    ${CMake_SOURCE_DIR}/Source
+    ${CMake_SOURCE_DIR}/Source/CTest
+    )
+  set_property(TARGET cthwalloc PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMake_BIN_DIR})
+endif()
+
+if(TARGET cthwalloc)
+  add_RunCMake_test(CTestHardwareAllocation -DCTHWALLOC_COMMAND=$<TARGET_FILE:cthwalloc>)
+else()
+  message(WARNING "Could not find or build cthwalloc")
+endif()
+
 find_package(Qt4 QUIET)
 find_package(Qt5Core QUIET)
 if (QT4_FOUND AND Qt5Core_FOUND AND NOT Qt5Core_VERSION VERSION_LESS 5.1.0)
@@ -355,7 +401,10 @@ if("${CMAKE_GENERATOR}" MATCHES "Visual Studio")
 endif()
 
 if("${CMAKE_GENERATOR}" MATCHES "Visual Studio ([^9]|9[0-9])")
-  add_RunCMake_test(VS10Project)
+  add_RunCMake_test(VS10Project
+    -DCMAKE_C_COMPILER_ID=${CMAKE_C_COMPILER_ID}
+    -DCMAKE_C_COMPILER_VERSION=${CMAKE_C_COMPILER_VERSION}
+    )
   if( vs12 AND wince )
     add_RunCMake_test( VS10ProjectWinCE "-DRunCMake_GENERATOR_PLATFORM=${wince_sdk}")
   endif()
@@ -400,7 +449,12 @@ else()
   set(NO_NAMELINK 0)
 endif()
 
-add_RunCMake_test(install -DNO_NAMELINK=${NO_NAMELINK} -DCYGWIN=${CYGWIN})
+add_RunCMake_test(install -DNO_NAMELINK=${NO_NAMELINK} -DCYGWIN=${CYGWIN} -DCMAKE_C_COMPILER_ID=${CMAKE_C_COMPILER_ID}
+  -DCMAKE_SHARED_LIBRARY_RPATH_ORIGIN_TOKEN=${CMAKE_SHARED_LIBRARY_RPATH_ORIGIN_TOKEN}
+  -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
+  -DCMAKE_SHARED_LIBRARY_RUNTIME_C_FLAG=${CMAKE_SHARED_LIBRARY_RUNTIME_C_FLAG}
+  -DCMAKE_EXECUTABLE_FORMAT=${CMAKE_EXECUTABLE_FORMAT})
+
 add_RunCMake_test(CPackCommandLine)
 add_RunCMake_test(CPackConfig)
 add_RunCMake_test(CPackInstallProperties)
@@ -419,8 +473,8 @@ if(UNIX)
   add_RunCMake_test(CPackSymlinks)
 endif()
 
-set(IfacePaths_INCLUDE_DIRECTORIES_ARGS -DTEST_PROP=INCLUDE_DIRECTORIES)
-add_RunCMake_test(IfacePaths_INCLUDE_DIRECTORIES TEST_DIR IfacePaths)
+set(IfacePaths_INCDIRS_ARGS -DTEST_PROP=INCLUDE_DIRECTORIES)
+add_RunCMake_test(IfacePaths_INCDIRS TEST_DIR IfacePaths)
 
 set(IfacePaths_SOURCES_ARGS -DTEST_PROP=SOURCES)
 add_RunCMake_test(IfacePaths_SOURCES TEST_DIR IfacePaths)
@@ -440,9 +494,11 @@ endif()
 
 add_executable(pseudo_emulator pseudo_emulator.c)
 add_executable(pseudo_emulator_custom_command pseudo_emulator_custom_command.c)
+add_executable(pseudo_emulator_custom_command_arg pseudo_emulator_custom_command_arg.c)
 add_RunCMake_test(CrosscompilingEmulator
  -DPSEUDO_EMULATOR=$<TARGET_FILE:pseudo_emulator>
- -DPSEUDO_EMULATOR_CUSTOM_COMMAND=$<TARGET_FILE:pseudo_emulator_custom_command>)
+ -DPSEUDO_EMULATOR_CUSTOM_COMMAND=$<TARGET_FILE:pseudo_emulator_custom_command>
+ -DPSEUDO_EMULATOR_CUSTOM_COMMAND_ARG=$<TARGET_FILE:pseudo_emulator_custom_command_arg>)
 if("${CMAKE_GENERATOR}" MATCHES "Make|Ninja")
   if(UNIX AND NOT CYGWIN)
     execute_process(COMMAND ldd --help
@@ -493,6 +549,7 @@ set(cpack_tests
   DEB.TIMESTAMPS
   DEB.MD5SUMS
   DEB.DEB_PACKAGE_VERSION_BACK_COMPATIBILITY
+  DEB.DEB_DESCRIPTION
 
   RPM.CUSTOM_BINARY_SPEC_FILE
   RPM.CUSTOM_NAMES
@@ -526,7 +583,7 @@ set(cpack_tests
 add_RunCMake_test_group(CPack "${cpack_tests}")
 # add a test to make sure symbols are exported from a shared library
 # for MSVC compilers CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS property is used
-add_RunCMake_test(AutoExportDll)
+add_RunCMake_test(AutoExportDll -DCMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID})
 
 add_RunCMake_test(AndroidMK)
 
@@ -555,3 +612,8 @@ if(${CMAKE_GENERATOR} MATCHES "Visual Studio ([^9]|9[0-9])")
   add_RunCMake_test(CSharpCustomCommand)
   add_RunCMake_test(CSharpReferenceImport)
 endif()
+
+add_RunCMake_test("CTestCommandExpandLists")
+
+add_RunCMake_test(PrecompileHeaders)
+add_RunCMake_test("UnityBuild")

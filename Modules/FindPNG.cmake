@@ -69,8 +69,8 @@ if(ZLIB_FOUND)
     unset(_PNG_VERSION_SUFFIX_MIN)
   endif ()
   foreach(v IN LISTS _PNG_VERSION_SUFFIXES)
-    list(APPEND PNG_NAMES png${v} libpng${v})
-    list(APPEND PNG_NAMES_DEBUG png${v}d libpng${v}d)
+    list(APPEND PNG_NAMES png${v} libpng${v} libpng${v}_static)
+    list(APPEND PNG_NAMES_DEBUG png${v}d libpng${v}d libpng${v}_staticd)
   endforeach()
   unset(_PNG_VERSION_SUFFIXES)
   # For compatibility with versions prior to this multi-config search, honor
@@ -100,13 +100,14 @@ if(ZLIB_FOUND)
            # No need to define PNG_USE_DLL here, because it's default for Cygwin.
         else()
           set (PNG_DEFINITIONS -DPNG_STATIC)
+          set(_PNG_COMPILE_DEFINITIONS PNG_STATIC)
         endif()
       endif ()
 
       if(NOT TARGET PNG::PNG)
         add_library(PNG::PNG UNKNOWN IMPORTED)
         set_target_properties(PNG::PNG PROPERTIES
-          INTERFACE_COMPILE_DEFINITIONS "${PNG_DEFINITIONS}"
+          INTERFACE_COMPILE_DEFINITIONS "${_PNG_COMPILE_DEFINITIONS}"
           INTERFACE_INCLUDE_DIRECTORIES "${PNG_INCLUDE_DIRS}"
           INTERFACE_LINK_LIBRARIES ZLIB::ZLIB)
         if(EXISTS "${PNG_LIBRARY}")
@@ -129,6 +130,8 @@ if(ZLIB_FOUND)
             IMPORTED_LOCATION_DEBUG "${PNG_LIBRARY_DEBUG}")
         endif()
       endif()
+
+      unset(_PNG_COMPILE_DEFINITIONS)
   endif ()
 
   if (PNG_PNG_INCLUDE_DIR AND EXISTS "${PNG_PNG_INCLUDE_DIR}/png.h")

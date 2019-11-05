@@ -103,7 +103,8 @@ public:
 
   bool ShouldStripResourcePath(cmMakefile*) const override;
 
-  bool SetGeneratorToolset(std::string const& ts, cmMakefile* mf) override;
+  bool SetGeneratorToolset(std::string const& ts, bool build,
+                           cmMakefile* mf) override;
   void AppendFlag(std::string& flags, std::string const& flag) const;
 
 protected:
@@ -122,13 +123,11 @@ private:
   std::string RelativeToSource(const std::string& p);
   std::string RelativeToBinary(const std::string& p);
   std::string ConvertToRelativeForMake(std::string const& p);
-  void CreateCustomCommands(cmXCodeObject* buildPhases,
-                            cmXCodeObject* sourceBuildPhase,
-                            cmXCodeObject* headerBuildPhase,
-                            cmXCodeObject* resourceBuildPhase,
-                            std::vector<cmXCodeObject*> contentBuildPhases,
-                            cmXCodeObject* frameworkBuildPhase,
-                            cmGeneratorTarget* gtgt);
+  void CreateCustomCommands(
+    cmXCodeObject* buildPhases, cmXCodeObject* sourceBuildPhase,
+    cmXCodeObject* headerBuildPhase, cmXCodeObject* resourceBuildPhase,
+    std::vector<cmXCodeObject*> const& contentBuildPhases,
+    cmXCodeObject* frameworkBuildPhase, cmGeneratorTarget* gtgt);
 
   std::string ComputeInfoPListLocation(cmGeneratorTarget* target);
 

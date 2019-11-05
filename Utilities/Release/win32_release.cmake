@@ -5,7 +5,7 @@ set(PROCESSORS 16)
 set(HOST win32)
 set(RUN_LAUNCHER ~/rel/run)
 set(CPACK_BINARY_GENERATORS "WIX ZIP")
-set(CPACK_SOURCE_GENERATORS "ZIP")
+set(CPACK_SOURCE_GENERATORS "")
 set(MAKE_PROGRAM "ninja")
 set(MAKE "${MAKE_PROGRAM} -j16")
 set(qt_prefix "c:/Qt/5.12.1/msvc2017-32-w7-mt")
@@ -28,8 +28,7 @@ CMAKE_Fortran_COMPILER:FILEPATH=FALSE
 CMAKE_GENERATOR:INTERNAL=Ninja
 BUILD_QtDialog:BOOL=TRUE
 CMake_GUI_DISTRIBUTE_WITH_Qt_LGPL:STRING=3
-CMAKE_C_FLAGS_RELEASE:STRING=-MT -O2 -Ob2 -DNDEBUG
-CMAKE_CXX_FLAGS_RELEASE:STRING=-MT -O2 -Ob2 -DNDEBUG
+CMAKE_MSVC_RUNTIME_LIBRARY:STRING=MultiThreaded$<$<CONFIG:Debug>:Debug>
 CMAKE_EXE_LINKER_FLAGS:STRING=-machine:x86 -subsystem:console,6.01
 CMake_QT_STATIC_QWindowsIntegrationPlugin_LIBRARIES:STRING=${qt_win_libs}
 CMAKE_PREFIX_PATH:STRING=${qt_prefix}
@@ -45,5 +44,9 @@ set(GIT_EXTRA "git config core.autocrlf true")
 if(CMAKE_CREATE_VERSION STREQUAL "nightly")
   # Some tests fail spuriously too often.
   set(EXTRA_CTEST_ARGS "-E 'ConsoleBuf|Module.ExternalData'")
+  set(SIGN "")
+else()
+  string(APPEND INITIAL_CACHE "CMake_INSTALL_SIGNTOOL:STRING=signtool\n")
+  set(SIGN [[signtool sign -v -a -tr http://timestamp.digicert.com -fd sha256 -td sha256 -d "CMake Windows Installer" cmake-*.msi]])
 endif()
 include(${path}/release_cmake.cmake)

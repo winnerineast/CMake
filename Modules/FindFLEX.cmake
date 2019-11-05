@@ -5,7 +5,8 @@
 FindFLEX
 --------
 
-Find flex executable and provides a macro to generate custom build rules
+Find Fast Lexical Analyzer (Flex) executable and provides a macro
+to generate custom build rules
 
 
 
@@ -22,7 +23,7 @@ The module defines the following variables:
 
 
 The minimum required version of flex can be specified using the
-standard syntax, e.g.  find_package(FLEX 2.5.13)
+standard syntax, e.g.  :command:`find_package(FLEX 2.5.13)`
 
 
 
@@ -94,6 +95,7 @@ respectively ``FLEX_TARGET`` and ``BISON_TARGET`` macros.
       ${BISON_MyParser_OUTPUTS}
       ${FLEX_MyScanner_OUTPUTS}
    )
+   target_link_libraries(Foo ${FLEX_LIBRARIES})
   ====================================================================
 #]=======================================================================]
 

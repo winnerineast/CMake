@@ -5,26 +5,28 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
-#include "cmFileTimeCache.h"
-#include "cm_sys_stat.h"
-#include "cmsys/RegularExpression.hxx"
-
 #include <string>
 #include <vector>
 
-class cmFileCommand;
+#include "cmsys/RegularExpression.hxx"
+
+#include "cm_sys_stat.h"
+
+#include "cmFileTimeCache.h"
+
+class cmExecutionStatus;
 class cmMakefile;
 
 // File installation helper class.
 struct cmFileCopier
 {
-  cmFileCopier(cmFileCommand* command, const char* name = "COPY");
+  cmFileCopier(cmExecutionStatus& status, const char* name = "COPY");
   virtual ~cmFileCopier();
 
   bool Run(std::vector<std::string> const& args);
 
 protected:
-  cmFileCommand* FileCommand;
+  cmExecutionStatus& Status;
   cmMakefile* Makefile;
   const char* Name;
   bool Always;
@@ -64,6 +66,7 @@ protected:
   // Translate an argument to a permissions bit.
   bool CheckPermissions(std::string const& arg, mode_t& permissions);
 
+  bool InstallSymlinkChain(std::string& fromFile, std::string& toFile);
   bool InstallSymlink(const std::string& fromFile, const std::string& toFile);
   bool InstallFile(const std::string& fromFile, const std::string& toFile,
                    MatchProperties match_properties);
@@ -86,6 +89,7 @@ protected:
   bool UseGivenPermissionsFile;
   bool UseGivenPermissionsDir;
   bool UseSourcePermissions;
+  bool FollowSymlinkChain;
   std::string Destination;
   std::string FilesFromDir;
   std::vector<std::string> Files;

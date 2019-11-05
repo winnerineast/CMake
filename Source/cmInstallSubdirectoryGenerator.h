@@ -5,10 +5,10 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
-#include "cmInstallGenerator.h"
-
 #include <iosfwd>
 #include <string>
+
+#include "cmInstallGenerator.h"
 
 class cmLocalGenerator;
 class cmMakefile;
@@ -28,7 +28,7 @@ public:
   void CheckCMP0082(bool& haveSubdirectoryInstall,
                     bool& haveInstallAfterSubdirectory) override;
 
-  void Compute(cmLocalGenerator* lg) override;
+  bool Compute(cmLocalGenerator* lg) override;
 
 protected:
   void GenerateScript(std::ostream& os) override;

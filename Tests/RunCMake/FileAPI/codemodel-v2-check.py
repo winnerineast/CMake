@@ -232,16 +232,36 @@ def check_target(c):
 
             assert is_string(obj["link"]["language"], expected["link"]["language"])
 
-            # FIXME: Properly test commandFragments
             if "commandFragments" in obj["link"]:
                 link_keys.append("commandFragments")
                 assert is_list(obj["link"]["commandFragments"])
                 for f in obj["link"]["commandFragments"]:
                     assert is_dict(f)
-                    assert sorted(f.keys()) == ["fragment", "role"]
+                    assert sorted(f.keys()) == ["fragment", "role"] or sorted(f.keys()) == ["backtrace", "fragment", "role"]
                     assert is_string(f["fragment"])
                     assert is_string(f["role"])
                     assert f["role"] in ("flags", "libraries", "libraryPath", "frameworkPath")
+
+            if expected["link"]["commandFragments"] is not None:
+                def check_link_command_fragments(actual, expected):
+                    assert is_dict(actual)
+                    expected_keys = ["fragment", "role"]
+
+                    if expected["backtrace"] is not None:
+                        expected_keys.append("backtrace")
+                        assert matches(actual["fragment"], expected["fragment"])
+                        assert actual["role"] == expected["role"]
+                        check_backtrace(obj, actual["backtrace"], expected["backtrace"])
+
+                    assert sorted(actual.keys()) == sorted(expected_keys)
+
+                check_list_match(lambda a, e: matches(a["fragment"], e["fragment"]),
+                                 obj["link"]["commandFragments"], expected["link"]["commandFragments"],
+                                 check=check_link_command_fragments,
+                                 check_exception=lambda a, e: "Link fragment: %s" % a["fragment"],
+                                 missing_exception=lambda e: "Link fragment: %s" % e["fragment"],
+                                 extra_exception=lambda a: "Link fragment: %s" % a["fragment"],
+                                 allow_extra=True)
 
             if expected["link"]["lto"] is not None:
                 link_keys.append("lto")
@@ -327,14 +347,32 @@ def check_target(c):
                                  missing_exception=lambda e: "Source path: %s" % e,
                                  extra_exception=lambda a: "Source path: %s" % obj["sources"][a]["path"])
 
-                # FIXME: Properly test compileCommandFragments
                 if "compileCommandFragments" in actual:
                     expected_keys.append("compileCommandFragments")
                     assert is_list(actual["compileCommandFragments"])
                     for f in actual["compileCommandFragments"]:
                         assert is_dict(f)
-                        assert sorted(f.keys()) == ["fragment"]
                         assert is_string(f["fragment"])
+
+                if expected["compileCommandFragments"] is not None:
+                    def check_compile_command_fragments(actual, expected):
+                        assert is_dict(actual)
+                        expected_keys = ["fragment"]
+
+                        if expected["backtrace"] is not None:
+                            expected_keys.append("backtrace")
+                            assert actual["fragment"] == expected["fragment"]
+                            check_backtrace(obj, actual["backtrace"], expected["backtrace"])
+
+                        assert sorted(actual.keys()) == sorted(expected_keys)
+
+                    check_list_match(lambda a, e: is_string(a["fragment"], e["fragment"]),
+                                     actual["compileCommandFragments"], expected["compileCommandFragments"],
+                                     check=check_compile_command_fragments,
+                                     check_exception=lambda a, e: "Compile fragment: %s" % a["fragment"],
+                                     missing_exception=lambda e: "Compile fragment: %s" % e["fragment"],
+                                     extra_exception=lambda a: "Compile fragment: %s" % a["fragment"],
+                                     allow_extra=True)
 
                 if expected["includes"] is not None:
                     expected_keys.append("includes")
@@ -931,6 +969,7 @@ def gen_check_targets(c, g, inSource):
                             "backtrace": None,
                         },
                     ],
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -979,6 +1018,11 @@ def gen_check_targets(c, g, inSource):
                     "_dllExtra": False,
                 },
                 {
+                    "path": "^lib/my_interface_exe\\.imp$",
+                    "_aixExtra": True,
+                    "_dllExtra": False,
+                },
+                {
                     "path": "^lib/((Debug|Release|RelWithDebInfo|MinSizeRel)/)?(lib)?my_interface_exe\\.(dll\\.a|lib)$",
                     "_dllExtra": True,
                 },
@@ -993,6 +1037,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -1059,6 +1104,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -1166,6 +1212,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -1212,6 +1259,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -1312,6 +1360,7 @@ def gen_check_targets(c, g, inSource):
                             "backtrace": None,
                         },
                     ],
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -1362,6 +1411,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": True,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -1428,6 +1478,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+					"compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -1474,6 +1525,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": True,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -1569,6 +1621,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -1676,6 +1729,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -1722,6 +1776,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -1974,6 +2029,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -2057,6 +2113,25 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": [
+                        {
+                            "fragment" : "TargetCompileOptions",
+							"backtrace": [
+                                {
+                                    "file": "^cxx/CMakeLists\\.txt$",
+                                    "line": 17,
+                                    "command": "target_compile_options",
+                                    "hasParent": True,
+                                },
+								{
+                                    "file" : "^cxx/CMakeLists\\.txt$",
+                                    "line": None,
+                                    "command": None,
+                                    "hasParent": False,
+                                },
+                            ],
+                        }
+                    ],
                 },
             ],
             "backtrace": [
@@ -2087,10 +2162,99 @@ def gen_check_targets(c, g, inSource):
             ],
             "build": "^cxx$",
             "source": "^cxx$",
-            "install": None,
+            "install": {
+                "prefix": "^(/usr/local|[A-Za-z]:.*/codemodel-v2)$",
+                "destinations": [
+                    {
+                        "path": "bin",
+                        "backtrace": [
+                            {
+                                "file": "^codemodel-v2\\.cmake$",
+                                "line": 37,
+                                "command": "install",
+                                "hasParent": True,
+                            },
+                            {
+                                "file": "^codemodel-v2\\.cmake$",
+                                "line": None,
+                                "command": None,
+                                "hasParent": True,
+                            },
+                            {
+                                "file": "^CMakeLists\\.txt$",
+                                "line": 3,
+                                "command": "include",
+                                "hasParent": True,
+                            },
+                            {
+                                "file": "^CMakeLists\\.txt$",
+                                "line": None,
+                                "command": None,
+                                "hasParent": False,
+                            },
+                        ],
+                    },
+                ],
+            },
             "link": {
                 "language": "CXX",
                 "lto": None,
+                "commandFragments": [
+                    {
+                        "fragment" : "TargetLinkOptions",
+                        "role" : "flags",
+                        "backtrace": [
+                            {
+                                "file": "^cxx/CMakeLists\\.txt$",
+                                "line": 18,
+                                "command": "target_link_options",
+                                "hasParent": True,
+                            },
+                            {
+                                "file" : "^cxx/CMakeLists\\.txt$",
+                                "line": None,
+                                "command": None,
+                                "hasParent": False,
+                            },
+                        ],
+                    },
+                    {
+                        "fragment" : ".*TargetLinkDir\\\"?$",
+                        "role" : "libraryPath",
+                        "backtrace": [
+                            {
+                                "file": "^cxx/CMakeLists\\.txt$",
+                                "line": 19,
+                                "command": "target_link_directories",
+                                "hasParent": True,
+                            },
+                            {
+                                "file" : "^cxx/CMakeLists\\.txt$",
+                                "line": None,
+                                "command": None,
+                                "hasParent": False,
+                            },
+                        ],
+                    },
+                    {
+                        "fragment" : ".*cxx_lib.*",
+                        "role" : "libraries",
+                        "backtrace": [
+                            {
+                                "file": "^cxx/CMakeLists\\.txt$",
+                                "line": 6,
+                                "command": "target_link_libraries",
+                                "hasParent": True,
+                            },
+                            {
+                                "file" : "^cxx/CMakeLists\\.txt$",
+                                "line": None,
+                                "command": None,
+                                "hasParent": False,
+                            },
+                        ],
+                    },
+                ],
             },
             "archive": None,
             "dependencies": [
@@ -2167,6 +2331,7 @@ def gen_check_targets(c, g, inSource):
                             "backtrace": None,
                         },
                     ],
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -2205,6 +2370,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "CXX",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -2259,6 +2425,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -2293,6 +2460,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "CXX",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -2364,6 +2532,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -2447,6 +2616,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -2481,6 +2651,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "CXX",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -2705,6 +2876,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -2739,6 +2911,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -2810,6 +2983,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -2844,6 +3018,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "CXX",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -3076,6 +3251,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3183,6 +3359,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3238,6 +3415,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -3299,6 +3477,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3406,6 +3585,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3461,6 +3641,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "CXX",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -3687,6 +3868,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3721,6 +3903,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -3775,6 +3958,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3809,6 +3993,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -3863,6 +4048,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3897,6 +4083,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -3951,6 +4138,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -3985,6 +4173,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -4039,6 +4228,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -4073,6 +4263,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -4363,6 +4554,7 @@ def gen_check_targets(c, g, inSource):
                     ],
                     "includes": None,
                     "defines": None,
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -4397,6 +4589,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "C",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -4645,7 +4838,20 @@ def gen_check_targets(c, g, inSource):
                         {
                             "path": "^.*/Tests/RunCMake/FileAPI/FileAPIExternalBuild$",
                             "isSystem": None,
-                            "backtrace": None,
+                            "backtrace": [
+                                {
+                                    "file": "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": 10,
+                                    "command": "set_property",
+                                    "hasParent": True,
+                                },
+                                {
+                                    "file": "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": None,
+                                    "command": None,
+                                    "hasParent": False,
+                                },
+                            ],
                         },
                         {
                             "path": "^.*/Tests/RunCMake/FileAPIExternalSource$",
@@ -4669,11 +4875,37 @@ def gen_check_targets(c, g, inSource):
                     "defines": [
                         {
                             "define": "EMPTY_C=1",
-                            "backtrace": None,
+                            "backtrace": [
+                                {
+                                    "file": "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": 9,
+                                    "command": "set_property",
+                                    "hasParent": True,
+                                },
+                                {
+                                    "file": "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": None,
+                                    "command": None,
+                                    "hasParent": False,
+                                },
+                            ],
                         },
                         {
                             "define": "SRC_DUMMY",
-                            "backtrace": None,
+                            "backtrace": [
+                                {
+                                    "file": "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": 9,
+                                    "command": "set_property",
+                                    "hasParent": True,
+                                },
+                                {
+                                    "file": "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": None,
+                                    "command": None,
+                                    "hasParent": False,
+                                },
+                            ],
                         },
                         {
                             "define": "GENERATED_EXE=1",
@@ -4709,6 +4941,25 @@ def gen_check_targets(c, g, inSource):
                                 },
                             ],
                         },
+                    ],
+                    "compileCommandFragments": [
+                        {
+                            "fragment" : "SRC_COMPILE_OPTIONS_DUMMY",
+                            "backtrace": [
+                                {
+                                    "file": "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": 13,
+                                    "command": "set_source_files_properties",
+                                    "hasParent": True,
+                                },
+                                {
+                                    "file" : "^.*/Tests/RunCMake/FileAPIExternalSource/CMakeLists\\.txt$",
+                                    "line": None,
+                                    "command": None,
+                                    "hasParent": False,
+                                },
+                            ],
+                        }
                     ],
                 },
                 {
@@ -4772,6 +5023,7 @@ def gen_check_targets(c, g, inSource):
                             ],
                         },
                     ],
+                    "compileCommandFragments": None,
                 },
             ],
             "backtrace": [
@@ -4806,6 +5058,7 @@ def gen_check_targets(c, g, inSource):
             "link": {
                 "language": "CXX",
                 "lto": None,
+                "commandFragments": None,
             },
             "archive": None,
             "dependencies": [
@@ -4894,6 +5147,10 @@ def gen_check_targets(c, g, inSource):
     if sys.platform not in ("win32", "cygwin", "msys"):
         for e in expected:
             e["artifacts"] = filter_list(lambda a: not a["_dllExtra"], e["artifacts"])
+
+    if "aix" not in sys.platform:
+        for e in expected:
+            e["artifacts"] = filter_list(lambda a: not a.get("_aixExtra", False), e["artifacts"])
 
     return expected
 

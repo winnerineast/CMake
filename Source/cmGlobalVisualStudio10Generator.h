@@ -20,7 +20,8 @@ public:
 
   bool SetSystemName(std::string const& s, cmMakefile* mf) override;
   bool SetGeneratorPlatform(std::string const& p, cmMakefile* mf) override;
-  bool SetGeneratorToolset(std::string const& ts, cmMakefile* mf) override;
+  bool SetGeneratorToolset(std::string const& ts, bool build,
+                           cmMakefile* mf) override;
 
   std::vector<GeneratedMakeCommand> GenerateBuildCommand(
     const std::string& makeProgram, const std::string& projectName,
@@ -45,6 +46,9 @@ public:
   bool IsNsightTegra() const;
   std::string GetNsightTegraVersion() const;
 
+  /** The vctargets path for the target platform.  */
+  const char* GetCustomVCTargetsPath() const;
+
   /** The toolset name for the target platform.  */
   const char* GetPlatformToolset() const;
   std::string const& GetPlatformToolsetString() const;
@@ -60,6 +64,10 @@ public:
   /** The cuda toolset version.  */
   const char* GetPlatformToolsetCuda() const;
   std::string const& GetPlatformToolsetCudaString() const;
+
+  /** The custom cuda install directory */
+  const char* GetPlatformToolsetCudaCustomDir() const;
+  std::string const& GetPlatformToolsetCudaCustomDirString() const;
 
   /** Return whether we need to use No/Debug instead of false/true
       for GenerateDebugInformation.  */
@@ -110,6 +118,9 @@ public:
 
   static std::string GetInstalledNsightTegraVersion();
 
+  /** Return the first two components of CMAKE_SYSTEM_VERSION.  */
+  std::string GetApplicationTypeRevision() const;
+
   cmIDEFlagTable const* GetClFlagTable() const;
   cmIDEFlagTable const* GetCSharpFlagTable() const;
   cmIDEFlagTable const* GetRcFlagTable() const;
@@ -148,7 +159,9 @@ protected:
   std::string GeneratorToolset;
   std::string GeneratorToolsetVersion;
   std::string GeneratorToolsetHostArchitecture;
+  std::string GeneratorToolsetCustomVCTargetsDir;
   std::string GeneratorToolsetCuda;
+  std::string GeneratorToolsetCudaCustomDir;
   std::string DefaultPlatformToolset;
   std::string DefaultPlatformToolsetHostArchitecture;
   std::string WindowsTargetPlatformVersion;
@@ -198,6 +211,7 @@ private:
 
   bool ParseGeneratorToolset(std::string const& ts, cmMakefile* mf);
 
+  std::string CustomVCTargetsPath;
   std::string VCTargetsPath;
   bool FindVCTargetsPath(cmMakefile* mf);
 

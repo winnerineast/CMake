@@ -2,37 +2,43 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmCTestMultiProcessHandler.h"
 
-#include "cmAffinity.h"
-#include "cmCTest.h"
-#include "cmCTestRunTest.h"
-#include "cmCTestTestHandler.h"
-#include "cmDuration.h"
-#include "cmListFileCache.h"
-#include "cmRange.h"
-#include "cmSystemTools.h"
-#include "cmWorkingDirectory.h"
+#include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <list>
+#include <memory>
+#include <sstream>
+#include <stack>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "cmsys/FStream.hxx"
+#include "cmsys/SystemInformation.hxx"
 
 #include "cm_jsoncpp_value.h"
 #include "cm_jsoncpp_writer.h"
 #include "cm_uv.h"
 
+#include "cmAffinity.h"
+#include "cmAlgorithms.h"
+#include "cmCTest.h"
+#include "cmCTestBinPacker.h"
+#include "cmCTestRunTest.h"
+#include "cmCTestTestHandler.h"
+#include "cmDuration.h"
+#include "cmListFileCache.h"
+#include "cmRange.h"
+#include "cmStringAlgorithms.h"
+#include "cmSystemTools.h"
 #include "cmUVSignalHackRAII.h" // IWYU pragma: keep
-
-#include "cmsys/FStream.hxx"
-#include "cmsys/SystemInformation.hxx"
-
-#include <algorithm>
-#include <chrono>
-#include <cstring>
-#include <iomanip>
-#include <iostream>
-#include <list>
-#include <math.h>
-#include <sstream>
-#include <stack>
-#include <stdlib.h>
-#include <unordered_map>
-#include <utility>
+#include "cmWorkingDirectory.h"
 
 namespace cmsys {
 class RegularExpression;
@@ -107,8 +113,7 @@ void cmCTestMultiProcessHandler::SetTestLoad(unsigned long load)
   std::string fake_load_value;
   if (cmSystemTools::GetEnv("__CTEST_FAKE_LOAD_AVERAGE_FOR_TESTING",
                             fake_load_value)) {
-    if (!cmSystemTools::StringToULong(fake_load_value.c_str(),
-                                      &this->FakeLoadForTesting)) {
+    if (!cmStrToULong(fake_load_value, &this->FakeLoadForTesting)) {
       cmSystemTools::Error("Failed to parse fake load value: " +
                            fake_load_value);
     }
@@ -130,6 +135,12 @@ void cmCTestMultiProcessHandler::RunTests()
   this->StartNextTests();
   uv_run(&this->Loop, UV_RUN_DEFAULT);
   uv_loop_close(&this->Loop);
+
+  if (!this->StopTimePassed) {
+    assert(this->Completed == this->Total);
+    assert(this->Tests.empty());
+  }
+  assert(this->AllHardwareAvailable());
 
   this->MarkFinished();
   this->UpdateCostData();
@@ -160,25 +171,34 @@ bool cmCTestMultiProcessHandler::StartTestProcess(int test)
   this->RunningCount += GetProcessorsUsed(test);
 
   cmCTestRunTest* testRun = new cmCTestRunTest(*this);
-  if (this->CTest->GetRepeatUntilFail()) {
-    testRun->SetRunUntilFailOn();
+  if (this->CTest->GetRerunMode() != cmCTest::Rerun::Never) {
+    testRun->SetRerunMode(this->CTest->GetRerunMode());
     testRun->SetNumberOfRuns(this->CTest->GetTestRepeat());
   }
   testRun->SetIndex(test);
   testRun->SetTestProperties(this->Properties[test]);
+  if (this->TestHandler->UseHardwareSpec) {
+    testRun->SetUseAllocatedHardware(true);
+    testRun->SetAllocatedHardware(this->AllocatedHardware[test]);
+  }
 
   // Find any failed dependencies for this test. We assume the more common
   // scenario has no failed tests, so make it the outer loop.
   for (std::string const& f : *this->Failed) {
-    if (this->Properties[test]->RequireSuccessDepends.find(f) !=
-        this->Properties[test]->RequireSuccessDepends.end()) {
+    if (cmContains(this->Properties[test]->RequireSuccessDepends, f)) {
       testRun->AddFailedDependency(f);
     }
   }
 
   // Always lock the resources we'll be using, even if we fail to set the
   // working directory because FinishTestProcess() will try to unlock them
-  this->LockResources(test);
+  this->AllocateResources(test);
+
+  if (!this->TestsHaveSufficientHardware[test]) {
+    testRun->StartFailure("Insufficient hardware");
+    this->FinishTestProcess(testRun, false);
+    return false;
+  }
 
   cmWorkingDirectory workdir(this->Properties[test]->Directory);
   if (workdir.Failed()) {
@@ -187,12 +207,119 @@ bool cmCTestMultiProcessHandler::StartTestProcess(int test)
                           std::strerror(workdir.GetLastResult()));
   } else {
     if (testRun->StartTest(this->Completed, this->Total)) {
+      // Ownership of 'testRun' has moved to another structure.
+      // When the test finishes, FinishTestProcess will be called.
       return true;
     }
   }
 
+  // Pass ownership of 'testRun'.
   this->FinishTestProcess(testRun, false);
   return false;
+}
+
+bool cmCTestMultiProcessHandler::AllocateHardware(int index)
+{
+  if (!this->TestHandler->UseHardwareSpec) {
+    return true;
+  }
+
+  std::map<std::string, std::vector<cmCTestBinPackerAllocation>> allocations;
+  if (!this->TryAllocateHardware(index, allocations)) {
+    return false;
+  }
+
+  auto& allocatedHardware = this->AllocatedHardware[index];
+  allocatedHardware.resize(this->Properties[index]->Processes.size());
+  for (auto const& it : allocations) {
+    for (auto const& alloc : it.second) {
+      bool result = this->HardwareAllocator.AllocateResource(
+        it.first, alloc.Id, alloc.SlotsNeeded);
+      (void)result;
+      assert(result);
+      allocatedHardware[alloc.ProcessIndex][it.first].push_back(
+        { alloc.Id, static_cast<unsigned int>(alloc.SlotsNeeded) });
+    }
+  }
+
+  return true;
+}
+
+bool cmCTestMultiProcessHandler::TryAllocateHardware(
+  int index,
+  std::map<std::string, std::vector<cmCTestBinPackerAllocation>>& allocations)
+{
+  allocations.clear();
+
+  std::size_t processIndex = 0;
+  for (auto const& process : this->Properties[index]->Processes) {
+    for (auto const& requirement : process) {
+      for (int i = 0; i < requirement.UnitsNeeded; ++i) {
+        allocations[requirement.ResourceType].push_back(
+          { processIndex, requirement.SlotsNeeded, "" });
+      }
+    }
+    ++processIndex;
+  }
+
+  auto const& availableHardware = this->HardwareAllocator.GetResources();
+  for (auto& it : allocations) {
+    if (!availableHardware.count(it.first)) {
+      return false;
+    }
+    if (!cmAllocateCTestHardwareRoundRobin(availableHardware.at(it.first),
+                                           it.second)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void cmCTestMultiProcessHandler::DeallocateHardware(int index)
+{
+  if (!this->TestHandler->UseHardwareSpec) {
+    return;
+  }
+
+  {
+    auto& allocatedHardware = this->AllocatedHardware[index];
+    for (auto const& processAlloc : allocatedHardware) {
+      for (auto const& it : processAlloc) {
+        auto resourceType = it.first;
+        for (auto const& it2 : it.second) {
+          bool success = this->HardwareAllocator.DeallocateResource(
+            resourceType, it2.Id, it2.Slots);
+          (void)success;
+          assert(success);
+        }
+      }
+    }
+  }
+  this->AllocatedHardware.erase(index);
+}
+
+bool cmCTestMultiProcessHandler::AllHardwareAvailable()
+{
+  for (auto const& it : this->HardwareAllocator.GetResources()) {
+    for (auto const& it2 : it.second) {
+      if (it2.second.Locked != 0) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+void cmCTestMultiProcessHandler::CheckHardwareAvailable()
+{
+  for (auto test : this->SortedTests) {
+    std::map<std::string, std::vector<cmCTestBinPackerAllocation>> allocations;
+    this->TestsHaveSufficientHardware[test] =
+      !this->TestHandler->UseHardwareSpec ||
+      this->TryAllocateHardware(test, allocations);
+  }
 }
 
 bool cmCTestMultiProcessHandler::CheckStopTimePassed()
@@ -219,7 +346,7 @@ void cmCTestMultiProcessHandler::SetStopTimePassed()
   }
 }
 
-void cmCTestMultiProcessHandler::LockResources(int index)
+void cmCTestMultiProcessHandler::AllocateResources(int index)
 {
   this->LockedResources.insert(
     this->Properties[index]->LockedResources.begin(),
@@ -230,7 +357,7 @@ void cmCTestMultiProcessHandler::LockResources(int index)
   }
 }
 
-void cmCTestMultiProcessHandler::UnlockResources(int index)
+void cmCTestMultiProcessHandler::DeallocateResources(int index)
 {
   for (std::string const& i : this->Properties[index]->LockedResources) {
     this->LockedResources.erase(i);
@@ -272,9 +399,16 @@ bool cmCTestMultiProcessHandler::StartTest(int test)
 {
   // Check for locked resources
   for (std::string const& i : this->Properties[test]->LockedResources) {
-    if (this->LockedResources.find(i) != this->LockedResources.end()) {
+    if (cmContains(this->LockedResources, i)) {
       return false;
     }
+  }
+
+  // Allocate hardware
+  if (this->TestsHaveSufficientHardware[test] &&
+      !this->AllocateHardware(test)) {
+    this->DeallocateHardware(test);
+    return false;
   }
 
   // if there are no depends left then run this test
@@ -283,6 +417,7 @@ bool cmCTestMultiProcessHandler::StartTest(int test)
   }
   // This test was not able to start because it is waiting
   // on depends to run
+  this->DeallocateHardware(test);
   return false;
 }
 
@@ -467,7 +602,8 @@ void cmCTestMultiProcessHandler::FinishTestProcess(cmCTestRunTest* runner,
   this->TestFinishMap[test] = true;
   this->TestRunningMap[test] = false;
   this->WriteCheckpoint(test);
-  this->UnlockResources(test);
+  this->DeallocateHardware(test);
+  this->DeallocateResources(test);
   this->RunningCount -= GetProcessorsUsed(test);
 
   for (auto p : properties->Affinity) {
@@ -618,9 +754,7 @@ void cmCTestMultiProcessHandler::CreateParallelTestCostList()
   // In parallel test runs add previously failed tests to the front
   // of the cost list and queue other tests for further sorting
   for (auto const& t : this->Tests) {
-    if (std::find(this->LastTestsFailed.begin(), this->LastTestsFailed.end(),
-                  this->Properties[t.first]->Name) !=
-        this->LastTestsFailed.end()) {
+    if (cmContains(this->LastTestsFailed, this->Properties[t.first]->Name)) {
       // If the test failed last time, it should be run first.
       this->SortedTests.push_back(t.first);
       alreadySortedTests.insert(t.first);
@@ -653,16 +787,13 @@ void cmCTestMultiProcessHandler::CreateParallelTestCostList()
   // Reverse iterate over the different dependency levels (deepest first).
   // Sort tests within each level by COST and append them to the cost list.
   for (TestSet const& currentSet : cmReverseRange(priorityStack)) {
-    TestComparator comp(this);
-
     TestList sortedCopy;
-
-    sortedCopy.insert(sortedCopy.end(), currentSet.begin(), currentSet.end());
-
-    std::stable_sort(sortedCopy.begin(), sortedCopy.end(), comp);
+    cmAppend(sortedCopy, currentSet);
+    std::stable_sort(sortedCopy.begin(), sortedCopy.end(),
+                     TestComparator(this));
 
     for (auto const& j : sortedCopy) {
-      if (alreadySortedTests.find(j) == alreadySortedTests.end()) {
+      if (!cmContains(alreadySortedTests, j)) {
         this->SortedTests.push_back(j);
         alreadySortedTests.insert(j);
       }
@@ -688,13 +819,13 @@ void cmCTestMultiProcessHandler::CreateSerialTestCostList()
     presortedList.push_back(i.first);
   }
 
-  TestComparator comp(this);
-  std::stable_sort(presortedList.begin(), presortedList.end(), comp);
+  std::stable_sort(presortedList.begin(), presortedList.end(),
+                   TestComparator(this));
 
   TestSet alreadySortedTests;
 
   for (int test : presortedList) {
-    if (alreadySortedTests.find(test) != alreadySortedTests.end()) {
+    if (cmContains(alreadySortedTests, test)) {
       continue;
     }
 
@@ -702,8 +833,7 @@ void cmCTestMultiProcessHandler::CreateSerialTestCostList()
     GetAllTestDependencies(test, dependencies);
 
     for (int testDependency : dependencies) {
-      if (alreadySortedTests.find(testDependency) ==
-          alreadySortedTests.end()) {
+      if (!cmContains(alreadySortedTests, testDependency)) {
         alreadySortedTests.insert(testDependency);
         this->SortedTests.push_back(testDependency);
       }
@@ -782,6 +912,28 @@ static Json::Value DumpTimeoutAfterMatch(
   return timeoutAfterMatch;
 }
 
+static Json::Value DumpProcessesToJsonArray(
+  const std::vector<
+    std::vector<cmCTestTestHandler::cmCTestTestResourceRequirement>>&
+    processes)
+{
+  Json::Value jsonProcesses = Json::arrayValue;
+  for (auto const& it : processes) {
+    Json::Value jsonProcess = Json::objectValue;
+    Json::Value requirements = Json::arrayValue;
+    for (auto const& it2 : it) {
+      Json::Value res = Json::objectValue;
+      res[".type"] = it2.ResourceType;
+      // res[".units"] = it2.UnitsNeeded; // Intentionally commented out
+      res["slots"] = it2.SlotsNeeded;
+      requirements.append(res);
+    }
+    jsonProcess["requirements"] = requirements;
+    jsonProcesses.append(jsonProcess);
+  }
+  return jsonProcesses;
+}
+
 static Json::Value DumpCTestProperty(std::string const& name,
                                      Json::Value value)
 {
@@ -823,6 +975,11 @@ static Json::Value DumpCTestProperties(
       "FAIL_REGULAR_EXPRESSION",
       DumpRegExToJsonArray(testProperties.ErrorRegularExpressions)));
   }
+  if (!testProperties.SkipRegularExpressions.empty()) {
+    properties.append(DumpCTestProperty(
+      "SKIP_REGULAR_EXPRESSION",
+      DumpRegExToJsonArray(testProperties.SkipRegularExpressions)));
+  }
   if (!testProperties.FixturesCleanup.empty()) {
     properties.append(DumpCTestProperty(
       "FIXTURES_CLEANUP", DumpToJsonArray(testProperties.FixturesCleanup)));
@@ -848,6 +1005,10 @@ static Json::Value DumpCTestProperties(
       "PASS_REGULAR_EXPRESSION",
       DumpRegExToJsonArray(testProperties.RequiredRegularExpressions)));
   }
+  if (!testProperties.Processes.empty()) {
+    properties.append(DumpCTestProperty(
+      "PROCESSES", DumpProcessesToJsonArray(testProperties.Processes)));
+  }
   if (testProperties.WantAffinity) {
     properties.append(
       DumpCTestProperty("PROCESSOR_AFFINITY", testProperties.WantAffinity));
@@ -857,8 +1018,8 @@ static Json::Value DumpCTestProperties(
       DumpCTestProperty("PROCESSORS", testProperties.Processors));
   }
   if (!testProperties.RequiredFiles.empty()) {
-    properties["REQUIRED_FILES"] =
-      DumpToJsonArray(testProperties.RequiredFiles);
+    properties.append(DumpCTestProperty(
+      "REQUIRED_FILES", DumpToJsonArray(testProperties.RequiredFiles)));
   }
   if (!testProperties.LockedResources.empty()) {
     properties.append(DumpCTestProperty(
@@ -992,7 +1153,7 @@ static Json::Value DumpCTestInfo(
     const std::vector<std::string>& args = testRun.GetArguments();
     if (!args.empty()) {
       commandAndArgs.reserve(args.size() + 1);
-      commandAndArgs.insert(commandAndArgs.end(), args.begin(), args.end());
+      cmAppend(commandAndArgs, args);
     }
     testInfo["command"] = DumpToJsonArray(commandAndArgs);
   }

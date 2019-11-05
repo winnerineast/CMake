@@ -152,7 +152,9 @@ macro(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list _thread)
 
   foreach(_library ${_list})
     set(_combined_name ${_combined_name}_${_library})
-
+    if(NOT "${_thread}" STREQUAL "")
+      set(_combined_name ${_combined_name}_thread)
+    endif()
     if(_libraries_work)
       if (BLA_STATIC)
         if (WIN32)
@@ -239,7 +241,8 @@ if (BLA_VENDOR MATCHES "Intel" OR BLA_VENDOR STREQUAL "All")
         set(BLAS_mkl_DLL_SUFFIX "_dll")
       endif()
     else()
-      if(CMAKE_Fortran_COMPILER_LOADED AND CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+      # Switch to GNU Fortran support layer if needed (but not on Apple, where MKL does not provide it)
+      if(CMAKE_Fortran_COMPILER_LOADED AND CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT APPLE)
           set(BLAS_mkl_INTFACE "gf")
           set(BLAS_mkl_THREADING "gnu")
           set(BLAS_mkl_OMP "gomp")
@@ -402,20 +405,19 @@ if (BLA_VENDOR MATCHES "Intel" OR BLA_VENDOR STREQUAL "All")
       endif ()
 
       if (DEFINED ENV{MKLROOT})
-        set(_BLAS_MKLROOT_LIB_DIR "$ENV{MKLROOT}")
+        if (BLA_VENDOR STREQUAL "Intel10_32")
+          set(_BLAS_MKLROOT_LIB_DIR "$ENV{MKLROOT}/lib/ia32")
+        elseif (BLA_VENDOR MATCHES "^Intel10_64i?lp$" OR BLA_VENDOR MATCHES "^Intel10_64i?lp_seq$")
+          set(_BLAS_MKLROOT_LIB_DIR "$ENV{MKLROOT}/lib/intel64")
+        endif ()
       endif ()
       if (_BLAS_MKLROOT_LIB_DIR)
-        if( SIZEOF_INTEGER EQUAL 8 )
-          set( _BLAS_MKL_PATH_PREFIX "intel64" )
-        else()
-          set( _BLAS_MKL_PATH_PREFIX "ia32" )
-        endif()
         if (WIN32)
-          string(APPEND _BLAS_MKLROOT_LIB_DIR "/lib/${_BLAS_MKL_PATH_PREFIX}_win")
+          string(APPEND _BLAS_MKLROOT_LIB_DIR "_win")
         elseif (APPLE)
-          string(APPEND _BLAS_MKLROOT_LIB_DIR "/lib/${_BLAS_MKL_PATH_PREFIX}_mac")
+          string(APPEND _BLAS_MKLROOT_LIB_DIR "_mac")
         else ()
-          string(APPEND _BLAS_MKLROOT_LIB_DIR "/lib/${_BLAS_MKL_PATH_PREFIX}_lin")
+          string(APPEND _BLAS_MKLROOT_LIB_DIR "_lin")
         endif ()
       endif ()
 
@@ -477,6 +479,18 @@ if (BLA_VENDOR STREQUAL "OpenBLAS" OR BLA_VENDOR STREQUAL "All")
       ""
       "openblas"
       ""
+      )
+  endif()
+  if(NOT BLAS_LIBRARIES)
+    find_package(Threads)
+    # OpenBLAS (http://www.openblas.net)
+    check_fortran_libraries(
+      BLAS_LIBRARIES
+      BLAS
+      sgemm
+      ""
+      "openblas"
+      "${CMAKE_THREAD_LIBS_INIT}"
       )
   endif()
 endif ()

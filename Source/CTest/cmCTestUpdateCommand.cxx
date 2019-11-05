@@ -7,14 +7,11 @@
 #include "cmMakefile.h"
 #include "cmSystemTools.h"
 
-#include <vector>
-
 cmCTestGenericHandler* cmCTestUpdateCommand::InitializeHandler()
 {
-  if (this->Values[ct_SOURCE]) {
+  if (!this->Source.empty()) {
     this->CTest->SetCTestConfiguration(
-      "SourceDirectory",
-      cmSystemTools::CollapseFullPath(this->Values[ct_SOURCE]).c_str(),
+      "SourceDirectory", cmSystemTools::CollapseFullPath(this->Source).c_str(),
       this->Quiet);
   } else {
     this->CTest->SetCTestConfiguration(
@@ -60,6 +57,9 @@ cmCTestGenericHandler* cmCTestUpdateCommand::InitializeHandler()
     this->Makefile, "GITUpdateCustom", "CTEST_GIT_UPDATE_CUSTOM", this->Quiet);
   this->CTest->SetCTestConfigurationFromCMakeVariable(
     this->Makefile, "UpdateVersionOnly", "CTEST_UPDATE_VERSION_ONLY",
+    this->Quiet);
+  this->CTest->SetCTestConfigurationFromCMakeVariable(
+    this->Makefile, "UpdateVersionOverride", "CTEST_UPDATE_VERSION_OVERRIDE",
     this->Quiet);
   this->CTest->SetCTestConfigurationFromCMakeVariable(
     this->Makefile, "HGCommand", "CTEST_HG_COMMAND", this->Quiet);

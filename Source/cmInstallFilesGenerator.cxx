@@ -4,9 +4,7 @@
 
 #include "cmGeneratorExpression.h"
 #include "cmInstallType.h"
-#include "cmSystemTools.h"
-
-#include <memory> // IWYU pragma: keep
+#include "cmStringAlgorithms.h"
 
 class cmLocalGenerator;
 
@@ -42,16 +40,17 @@ cmInstallFilesGenerator::cmInstallFilesGenerator(
 
 cmInstallFilesGenerator::~cmInstallFilesGenerator() = default;
 
-void cmInstallFilesGenerator::Compute(cmLocalGenerator* lg)
+bool cmInstallFilesGenerator::Compute(cmLocalGenerator* lg)
 {
   this->LocalGenerator = lg;
+  return true;
 }
 
 std::string cmInstallFilesGenerator::GetDestination(
   std::string const& config) const
 {
-  cmGeneratorExpression ge;
-  return ge.Parse(this->Destination)->Evaluate(this->LocalGenerator, config);
+  return cmGeneratorExpression::Evaluate(this->Destination,
+                                         this->LocalGenerator, config);
 }
 
 void cmInstallFilesGenerator::AddFilesInstallRule(
@@ -81,11 +80,9 @@ void cmInstallFilesGenerator::GenerateScriptForConfig(
   std::ostream& os, const std::string& config, Indent indent)
 {
   std::vector<std::string> files;
-  cmGeneratorExpression ge;
   for (std::string const& f : this->Files) {
-    std::unique_ptr<cmCompiledGeneratorExpression> cge = ge.Parse(f);
-    cmSystemTools::ExpandListArgument(
-      cge->Evaluate(this->LocalGenerator, config), files);
+    cmExpandList(
+      cmGeneratorExpression::Evaluate(f, this->LocalGenerator, config), files);
   }
   this->AddFilesInstallRule(os, config, indent, files);
 }

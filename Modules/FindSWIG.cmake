@@ -5,13 +5,13 @@
 FindSWIG
 --------
 
-Find SWIG
+Find Simplified Wrapper and Interface Generator (SWIG)
 
 This module finds an installed SWIG.  It sets the following variables:
 
 ::
 
-  SWIG_FOUND - set to true if SWIG is found
+  SWIG_FOUND - set to "True" if SWIG is found
   SWIG_DIR - the directory where swig is installed
   SWIG_EXECUTABLE - the path to the swig executable
   SWIG_VERSION   - the version number of the swig executable
@@ -26,7 +26,7 @@ to be found can be changed from the command line by means of setting
 ``SWIG_EXECUTABLE``
 #]=======================================================================]
 
-find_program(SWIG_EXECUTABLE NAMES swig3.0 swig2.0 swig)
+find_program(SWIG_EXECUTABLE NAMES swig4.0 swig3.0 swig2.0 swig)
 
 if(SWIG_EXECUTABLE)
   execute_process(COMMAND ${SWIG_EXECUTABLE} -swiglib

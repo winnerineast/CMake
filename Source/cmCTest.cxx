@@ -2,33 +2,36 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmCTest.h"
 
-#include "cm_curl.h"
-#include "cm_zlib.h"
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <iostream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "cmsys/Base64.h"
 #include "cmsys/Directory.hxx"
 #include "cmsys/FStream.hxx"
 #include "cmsys/Glob.hxx"
 #include "cmsys/Process.h"
 #include "cmsys/SystemInformation.hxx"
-#include <algorithm>
-#include <chrono>
-#include <ctype.h>
-#include <iostream>
-#include <map>
-#include <memory> // IWYU pragma: keep
-#include <sstream>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string>
-#include <time.h>
-#include <utility>
-#include <vector>
+
+#include "cm_curl.h"
+#include "cm_zlib.h"
 #if defined(_WIN32)
 #  include <windows.h> // IWYU pragma: keep
 #else
 #  include <unistd.h> // IWYU pragma: keep
 #endif
+
+#include <cm/memory>
 
 #include "cmAlgorithms.h"
 #include "cmCTestBuildAndTestHandler.h"
@@ -51,6 +54,7 @@
 #include "cmState.h"
 #include "cmStateSnapshot.h"
 #include "cmStateTypes.h"
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
 #include "cmVersion.h"
 #include "cmVersionConfig.h"
@@ -80,7 +84,7 @@ struct cmCTest::Private
   };
 
   int RepeatTests = 1; // default to run each test once
-  bool RepeatUntilFail = false;
+  cmCTest::Rerun RerunMode = cmCTest::Rerun::Never;
   std::string ConfigType;
   std::string ScheduleType;
   std::chrono::system_clock::time_point StopTime;
@@ -153,7 +157,7 @@ struct cmCTest::Private
   bool TomorrowTag = false;
 
   int TestModel = cmCTest::EXPERIMENTAL;
-  std::string SpecificTrack;
+  std::string SpecificGroup;
 
   cmDuration TimeOut = cmDuration::zero();
 
@@ -321,12 +325,11 @@ cmCTest::cmCTest()
 {
   std::string envValue;
   if (cmSystemTools::GetEnv("CTEST_OUTPUT_ON_FAILURE", envValue)) {
-    this->Impl->OutputTestOutputOnTestFailure =
-      !cmSystemTools::IsOff(envValue);
+    this->Impl->OutputTestOutputOnTestFailure = !cmIsOff(envValue);
   }
   envValue.clear();
   if (cmSystemTools::GetEnv("CTEST_PROGRESS_OUTPUT", envValue)) {
-    this->Impl->TestProgressOutput = !cmSystemTools::IsOff(envValue);
+    this->Impl->TestProgressOutput = !cmIsOff(envValue);
   }
 
   this->Impl->Parts[PartStart].SetName("Start");
@@ -507,10 +510,10 @@ int cmCTest::Initialize(const char* binary_dir, cmCTestStartCommand* command)
             day != lctime->tm_mday) {
           tag.clear();
         }
-        std::string track;
-        if (cmSystemTools::GetLineFromStream(tfin, track) &&
+        std::string group;
+        if (cmSystemTools::GetLineFromStream(tfin, group) &&
             !this->Impl->Parts[PartStart] && !command) {
-          this->Impl->SpecificTrack = track;
+          this->Impl->SpecificGroup = group;
         }
         std::string model;
         if (cmSystemTools::GetLineFromStream(tfin, model) &&
@@ -563,13 +566,13 @@ int cmCTest::Initialize(const char* binary_dir, cmCTestStartCommand* command)
         }
       }
     } else {
-      std::string track;
+      std::string group;
       std::string modelStr;
       int model = cmCTest::UNKNOWN;
 
       if (tfin) {
         cmSystemTools::GetLineFromStream(tfin, tag);
-        cmSystemTools::GetLineFromStream(tfin, track);
+        cmSystemTools::GetLineFromStream(tfin, group);
         if (cmSystemTools::GetLineFromStream(tfin, modelStr)) {
           model = GetTestModelFromString(modelStr.c_str());
         }
@@ -604,15 +607,15 @@ int cmCTest::Initialize(const char* binary_dir, cmCTestStartCommand* command)
                            quiet);
       }
 
-      if (!this->Impl->SpecificTrack.empty() &&
-          track != this->Impl->SpecificTrack) {
+      if (!this->Impl->SpecificGroup.empty() &&
+          group != this->Impl->SpecificGroup) {
         cmCTestOptionalLog(this, WARNING,
-                           "Track given in TAG does not match "
-                           "track given in ctest_start()"
+                           "Group given in TAG does not match "
+                           "group given in ctest_start()"
                              << std::endl,
                            quiet);
       } else {
-        this->Impl->SpecificTrack = track;
+        this->Impl->SpecificGroup = group;
       }
 
       cmCTestOptionalLog(this, OUTPUT,
@@ -640,12 +643,10 @@ bool cmCTest::InitializeFromCommand(cmCTestStartCommand* command)
   cmMakefile* mf = command->GetMakefile();
   std::string fname;
 
-  std::string src_dir_fname = src_dir;
-  src_dir_fname += "/CTestConfig.cmake";
+  std::string src_dir_fname = cmStrCat(src_dir, "/CTestConfig.cmake");
   cmSystemTools::ConvertToUnixSlashes(src_dir_fname);
 
-  std::string bld_dir_fname = bld_dir;
-  bld_dir_fname += "/CTestConfig.cmake";
+  std::string bld_dir_fname = cmStrCat(bld_dir, "/CTestConfig.cmake");
   cmSystemTools::ConvertToUnixSlashes(bld_dir_fname);
 
   if (cmSystemTools::FileExists(bld_dir_fname)) {
@@ -661,8 +662,7 @@ bool cmCTest::InitializeFromCommand(cmCTestStartCommand* command)
                        command->ShouldBeQuiet());
     bool readit = mf->ReadDependentFile(fname);
     if (!readit) {
-      std::string m = "Could not find include file: ";
-      m += fname;
+      std::string m = cmStrCat("Could not find include file: ", fname);
       command->SetError(m);
       return false;
     }
@@ -752,7 +752,7 @@ bool cmCTest::UpdateCTestConfiguration()
   std::string const& testLoad = this->GetCTestConfiguration("TestLoad");
   if (!testLoad.empty()) {
     unsigned long load;
-    if (cmSystemTools::StringToULong(testLoad.c_str(), &load)) {
+    if (cmStrToULong(testLoad, &load)) {
       this->SetTestLoad(load);
     } else {
       cmCTestLog(this, WARNING,
@@ -761,7 +761,7 @@ bool cmCTest::UpdateCTestConfiguration()
   }
   if (this->Impl->ProduceXML) {
     this->Impl->CompressXMLFiles =
-      cmSystemTools::IsOn(this->GetCTestConfiguration("CompressSubmission"));
+      cmIsOn(this->GetCTestConfiguration("CompressSubmission"));
   }
   return true;
 }
@@ -855,8 +855,7 @@ bool cmCTest::AddIfExists(Part part, const char* file)
   if (this->CTestFileExists(file)) {
     this->AddSubmitFile(part, file);
   } else {
-    std::string name = file;
-    name += ".gz";
+    std::string name = cmStrCat(file, ".gz");
     if (this->CTestFileExists(name)) {
       this->AddSubmitFile(part, file);
     } else {
@@ -1020,8 +1019,8 @@ int cmCTest::ProcessSteps()
 
 std::string cmCTest::GetTestModelString()
 {
-  if (!this->Impl->SpecificTrack.empty()) {
-    return this->Impl->SpecificTrack;
+  if (!this->Impl->SpecificGroup.empty()) {
+    return this->Impl->SpecificGroup;
   }
   switch (this->Impl->TestModel) {
     case cmCTest::NIGHTLY:
@@ -1098,9 +1097,10 @@ int cmCTest::RunMakeCommand(const std::string& command, std::string& output,
   cmProcessOutput processOutput(encoding);
   std::string strdata;
   cmCTestLog(this, HANDLER_PROGRESS_OUTPUT,
-             "   Each . represents " << tick_len << " bytes of output"
-                                     << std::endl
-                                     << "    " << std::flush);
+             "   Each . represents " << tick_len
+                                     << " bytes of output\n"
+                                        "    "
+                                     << std::flush);
   while (cmsysProcess_WaitForData(cp, &data, &length, nullptr)) {
     processOutput.DecodeText(data, length, strdata);
     for (char& cc : strdata) {
@@ -1115,8 +1115,7 @@ int cmCTest::RunMakeCommand(const std::string& command, std::string& output,
       if (tick % tick_line_len == 0 && tick > 0) {
         cmCTestLog(this, HANDLER_PROGRESS_OUTPUT,
                    "  Size: " << int((double(output.size()) / 1024.0) + 1)
-                              << "K" << std::endl
-                              << "    " << std::flush);
+                              << "K\n    " << std::flush);
       }
     }
     cmCTestLog(this, HANDLER_VERBOSE_OUTPUT,
@@ -1221,9 +1220,7 @@ int cmCTest::RunTest(std::vector<const char*> argv, std::string* output,
             timeout != cmCTest::MaxDuration() &&
             timeout > cmDuration::zero()) {
           args.emplace_back("--test-timeout");
-          std::ostringstream msg;
-          msg << cmDurationTo<unsigned int>(timeout);
-          args.push_back(msg.str());
+          args.push_back(std::to_string(cmDurationTo<unsigned int>(timeout)));
         }
         args.emplace_back(i);
       }
@@ -1282,7 +1279,7 @@ int cmCTest::RunTest(std::vector<const char*> argv, std::string* output,
   while (cmsysProcess_WaitForData(cp, &data, &length, nullptr)) {
     processOutput.DecodeText(data, length, strdata);
     if (output) {
-      tempOutput.insert(tempOutput.end(), data, data + length);
+      cmAppend(tempOutput, data, data + length);
     }
     cmCTestLog(this, HANDLER_VERBOSE_OUTPUT,
                cmCTestLogWrite(strdata.c_str(), strdata.size()));
@@ -1319,23 +1316,19 @@ int cmCTest::RunTest(std::vector<const char*> argv, std::string* output,
       OutputTestErrors(tempOutput);
     }
     *retVal = cmsysProcess_GetExitException(cp);
-    std::string outerr = "\n*** Exception executing: ";
-    outerr += cmsysProcess_GetExceptionString(cp);
+    std::string outerr = cmStrCat("\n*** Exception executing: ",
+                                  cmsysProcess_GetExceptionString(cp));
     if (output) {
       *output += outerr;
     }
-    cmCTestLog(this, HANDLER_VERBOSE_OUTPUT,
-               outerr << std::endl
-                      << std::flush);
+    cmCTestLog(this, HANDLER_VERBOSE_OUTPUT, outerr << std::endl);
   } else if (result == cmsysProcess_State_Error) {
-    std::string outerr = "\n*** ERROR executing: ";
-    outerr += cmsysProcess_GetErrorString(cp);
+    std::string outerr =
+      cmStrCat("\n*** ERROR executing: ", cmsysProcess_GetErrorString(cp));
     if (output) {
       *output += outerr;
     }
-    cmCTestLog(this, HANDLER_VERBOSE_OUTPUT,
-               outerr << std::endl
-                      << std::flush);
+    cmCTestLog(this, HANDLER_VERBOSE_OUTPUT, outerr << std::endl);
   }
   cmsysProcess_Delete(cp);
 
@@ -1455,8 +1448,7 @@ void cmCTest::AddSiteProperties(cmXMLWriter& xml)
     if (labels) {
       xml.StartElement("Labels");
       std::string l = labels;
-      std::vector<std::string> args;
-      cmSystemTools::ExpandListArgument(l, args);
+      std::vector<std::string> args = cmExpandedList(l);
       for (std::string const& i : args) {
         xml.Element("Label", i);
       }
@@ -1488,14 +1480,12 @@ std::vector<std::string> cmCTest::GetLabelsForSubprojects()
 {
   std::string labelsForSubprojects =
     this->GetCTestConfiguration("LabelsForSubprojects");
-  std::vector<std::string> subprojects;
-  cmSystemTools::ExpandListArgument(labelsForSubprojects, subprojects);
+  std::vector<std::string> subprojects = cmExpandedList(labelsForSubprojects);
 
   // sort the array
   std::sort(subprojects.begin(), subprojects.end());
   // remove duplicates
-  std::vector<std::string>::iterator new_end =
-    std::unique(subprojects.begin(), subprojects.end());
+  auto new_end = std::unique(subprojects.begin(), subprojects.end());
   subprojects.erase(new_end, subprojects.end());
 
   return subprojects;
@@ -1523,7 +1513,7 @@ int cmCTest::GenerateCTestNotesOutput(cmXMLWriter& xml,
                 this->Impl->CurrentTag + "-" + this->GetTestModelString());
   xml.Attribute("Name", this->GetCTestConfiguration("Site"));
   xml.Attribute("Generator",
-                std::string("ctest") + cmVersion::GetCMakeVersion());
+                std::string("ctest-") + cmVersion::GetCMakeVersion());
   this->AddSiteProperties(xml);
   xml.StartElement("Notes");
 
@@ -1611,8 +1601,8 @@ std::string cmCTest::Base64GzipEncodeFile(std::string const& file)
   std::vector<std::string> files;
   files.push_back(file);
 
-  if (!cmSystemTools::CreateTar(tarFile.c_str(), files,
-                                cmSystemTools::TarCompressGZip, false)) {
+  if (!cmSystemTools::CreateTar(tarFile, files, cmSystemTools::TarCompressGZip,
+                                false)) {
     cmCTestLog(this, ERROR_MESSAGE,
                "Error creating tar while "
                "encoding file: "
@@ -1849,28 +1839,77 @@ bool cmCTest::HandleCommandLineArguments(size_t& i,
     this->SetParallelLevel(plevel);
     this->Impl->ParallelLevelSetInCli = true;
   }
+
   if (this->CheckArgument(arg, "--repeat-until-fail")) {
     if (i >= args.size() - 1) {
       errormsg = "'--repeat-until-fail' requires an argument";
       return false;
     }
+    if (this->Impl->RerunMode != cmCTest::Rerun::Never) {
+      errormsg = "At most one '--repeat-*' option may be used.";
+      return false;
+    }
     i++;
     long repeat = 1;
-    if (!cmSystemTools::StringToLong(args[i].c_str(), &repeat)) {
+    if (!cmStrToLong(args[i], &repeat)) {
       errormsg =
         "'--repeat-until-fail' given non-integer value '" + args[i] + "'";
       return false;
     }
     this->Impl->RepeatTests = static_cast<int>(repeat);
     if (repeat > 1) {
-      this->Impl->RepeatUntilFail = true;
+      this->Impl->RerunMode = cmCTest::Rerun::UntilFail;
+    }
+  }
+
+  if (this->CheckArgument(arg, "--repeat-until-pass")) {
+    if (i >= args.size() - 1) {
+      errormsg = "'--repeat-until-pass' requires an argument";
+      return false;
+    }
+    if (this->Impl->RerunMode != cmCTest::Rerun::Never) {
+      errormsg = "At most one '--repeat-*' option may be used.";
+      return false;
+    }
+    i++;
+    long repeat = 1;
+    if (!cmStrToLong(args[i], &repeat)) {
+      errormsg =
+        "'--repeat-until-pass' given non-integer value '" + args[i] + "'";
+      return false;
+    }
+    this->Impl->RepeatTests = static_cast<int>(repeat);
+    if (repeat > 1) {
+      this->Impl->RerunMode = cmCTest::Rerun::UntilPass;
+    }
+  }
+
+  if (this->CheckArgument(arg, "--repeat-after-timeout")) {
+    if (i >= args.size() - 1) {
+      errormsg = "'--repeat-after-timeout' requires an argument";
+      return false;
+    }
+    if (this->Impl->RerunMode != cmCTest::Rerun::Never) {
+      errormsg = "At most one '--repeat-*' option may be used.";
+      return false;
+    }
+    i++;
+    long repeat = 1;
+    if (!cmStrToLong(args[i], &repeat)) {
+      errormsg =
+        "'--repeat-after-timeout' given non-integer value '" + args[i] + "'";
+      return false;
+    }
+    this->Impl->RepeatTests = static_cast<int>(repeat);
+    if (repeat > 1) {
+      this->Impl->RerunMode = cmCTest::Rerun::AfterTimeout;
     }
   }
 
   if (this->CheckArgument(arg, "--test-load") && i < args.size() - 1) {
     i++;
     unsigned long load;
-    if (cmSystemTools::StringToULong(args[i].c_str(), &load)) {
+    if (cmStrToULong(args[i], &load)) {
       this->SetTestLoad(load);
     } else {
       cmCTestLog(this, WARNING,
@@ -1911,9 +1950,15 @@ bool cmCTest::HandleCommandLineArguments(size_t& i,
     this->Impl->Debug = true;
     this->Impl->ShowLineNumbers = true;
   }
+  if (this->CheckArgument(arg, "--group") && i < args.size() - 1) {
+    i++;
+    this->Impl->SpecificGroup = args[i];
+  }
+  // This is an undocumented / deprecated option.
+  // "Track" has been renamed to "Group".
   if (this->CheckArgument(arg, "--track") && i < args.size() - 1) {
     i++;
-    this->Impl->SpecificTrack = args[i];
+    this->Impl->SpecificGroup = args[i];
   }
   if (this->CheckArgument(arg, "--show-line-numbers")) {
     this->Impl->ShowLineNumbers = true;
@@ -1944,7 +1989,7 @@ bool cmCTest::HandleCommandLineArguments(size_t& i,
       i < args.size() - 1) {
     i++;
     long outputSize;
-    if (cmSystemTools::StringToLong(args[i].c_str(), &outputSize)) {
+    if (cmStrToLong(args[i], &outputSize)) {
       this->Impl->TestHandler.SetTestOutputSizePassed(int(outputSize));
     } else {
       cmCTestLog(this, WARNING,
@@ -1956,7 +2001,7 @@ bool cmCTest::HandleCommandLineArguments(size_t& i,
       i < args.size() - 1) {
     i++;
     long outputSize;
-    if (cmSystemTools::StringToLong(args[i].c_str(), &outputSize)) {
+    if (cmStrToLong(args[i], &outputSize)) {
       this->Impl->TestHandler.SetTestOutputSizeFailed(int(outputSize));
     } else {
       cmCTestLog(this, WARNING,
@@ -1967,7 +2012,7 @@ bool cmCTest::HandleCommandLineArguments(size_t& i,
   if (this->CheckArgument(arg, "-N", "--show-only")) {
     this->Impl->ShowOnly = true;
   }
-  if (cmSystemTools::StringStartsWith(arg.c_str(), "--show-only=")) {
+  if (cmHasLiteralPrefix(arg, "--show-only=")) {
     this->Impl->ShowOnly = true;
 
     // Check if a specific format is requested. Defaults to human readable
@@ -2003,7 +2048,7 @@ bool cmCTest::HandleCommandLineArguments(size_t& i,
   if (this->CheckArgument(arg, "--interactive-debug-mode") &&
       i < args.size() - 1) {
     i++;
-    this->Impl->InteractiveDebugMode = cmSystemTools::IsOn(args[i]);
+    this->Impl->InteractiveDebugMode = cmIsOn(args[i]);
   }
   if (this->CheckArgument(arg, "--submit-index") && i < args.size() - 1) {
     i++;
@@ -2094,6 +2139,15 @@ bool cmCTest::HandleCommandLineArguments(size_t& i,
       "ExcludeFixtureCleanupRegularExpression", args[i].c_str());
   }
 
+  if (this->CheckArgument(arg, "--hardware-spec-file") &&
+      i < args.size() - 1) {
+    i++;
+    this->GetTestHandler()->SetPersistentOption("HardwareSpecFile",
+                                                args[i].c_str());
+    this->GetMemCheckHandler()->SetPersistentOption("HardwareSpecFile",
+                                                    args[i].c_str());
+  }
+
   if (this->CheckArgument(arg, "--rerun-failed")) {
     this->GetTestHandler()->SetPersistentOption("RerunFailed", "true");
     this->GetMemCheckHandler()->SetPersistentOption("RerunFailed", "true");
@@ -2132,6 +2186,11 @@ bool cmCTest::ColoredOutputSupportedByConsole()
   return false;
 #else
   // On UNIX we need a non-dumb tty.
+  std::string clicolor_force;
+  if (cmSystemTools::GetEnv("CLICOLOR_FORCE", clicolor_force) &&
+      !clicolor_force.empty() && clicolor_force != "0") {
+    return true;
+  }
   return ConsoleIsNotDumb();
 #endif
 }
@@ -2194,8 +2253,7 @@ int cmCTest::Run(std::vector<std::string>& args, std::string* output)
   bool SRArgumentSpecified = false;
 
   // copy the command line
-  this->Impl->InitialCommandLineArguments.insert(
-    this->Impl->InitialCommandLineArguments.end(), args.begin(), args.end());
+  cmAppend(this->Impl->InitialCommandLineArguments, args);
 
   // process the command line arguments
   for (size_t i = 1; i < args.size(); ++i) {
@@ -2230,7 +2288,7 @@ int cmCTest::Run(std::vector<std::string>& args, std::string* output)
     // attempts are simply ignored since previous ctest versions ignore
     // this too. (As well as many other unknown command line args.)
     //
-    if (arg != "-D" && cmSystemTools::StringStartsWith(arg.c_str(), "-D")) {
+    if (arg != "-D" && cmHasLiteralPrefix(arg, "-D")) {
       std::string input = arg.substr(2);
       this->AddVariableDefinition(input);
     }
@@ -2426,7 +2484,7 @@ int cmCTest::RunCMakeAndTest(std::string* output)
   cmCTestBuildAndTestHandler* handler = this->GetBuildAndTestHandler();
   int retv = handler->ProcessHandler();
   *output = handler->GetOutput();
-#ifdef CMAKE_BUILD_WITH_CMAKE
+#ifndef CMAKE_BOOTSTRAP
   cmDynamicLoader::FlushCache();
 #endif
   if (retv != 0) {
@@ -2503,8 +2561,7 @@ int cmCTest::ReadCustomConfigurationFileTree(const char* dir, cmMakefile* mf)
              "* Read custom CTest configuration directory: " << dir
                                                              << std::endl);
 
-  std::string fname = dir;
-  fname += "/CTestCustom.cmake";
+  std::string fname = cmStrCat(dir, "/CTestCustom.cmake");
   cmCTestLog(this, DEBUG, "* Check for file: " << fname << std::endl);
   if (cmSystemTools::FileExists(fname)) {
     cmCTestLog(this, DEBUG,
@@ -2524,8 +2581,7 @@ int cmCTest::ReadCustomConfigurationFileTree(const char* dir, cmMakefile* mf)
     }
   }
 
-  std::string rexpr = dir;
-  rexpr += "/CTestCustom.ctest";
+  std::string rexpr = cmStrCat(dir, "/CTestCustom.ctest");
   cmCTestLog(this, DEBUG, "* Check for file: " << rexpr << std::endl);
   if (!found && cmSystemTools::FileExists(rexpr)) {
     cmsys::Glob gl;
@@ -2568,7 +2624,7 @@ void cmCTest::PopulateCustomVector(cmMakefile* mf, const std::string& def,
   cmCTestLog(this, DEBUG, "PopulateCustomVector: " << def << std::endl);
 
   vec.clear();
-  cmSystemTools::ExpandListArgument(dval, vec);
+  cmExpandList(dval, vec);
 
   for (std::string const& it : vec) {
     cmCTestLog(this, DEBUG, "  -- " << it << std::endl);
@@ -2677,8 +2733,7 @@ std::string cmCTest::GetSubmitURL()
     std::string site = this->GetCTestConfiguration("DropSite");
     std::string location = this->GetCTestConfiguration("DropLocation");
 
-    url = method.empty() ? "http" : method;
-    url += "://";
+    url = cmStrCat(method.empty() ? "http" : method, "://");
     if (!user.empty()) {
       url += user;
       if (!password.empty()) {
@@ -2773,21 +2828,21 @@ std::vector<std::string>& cmCTest::GetInitialCommandLineArguments()
   return this->Impl->InitialCommandLineArguments;
 }
 
-const char* cmCTest::GetSpecificTrack()
+const char* cmCTest::GetSpecificGroup()
 {
-  if (this->Impl->SpecificTrack.empty()) {
+  if (this->Impl->SpecificGroup.empty()) {
     return nullptr;
   }
-  return this->Impl->SpecificTrack.c_str();
+  return this->Impl->SpecificGroup.c_str();
 }
 
-void cmCTest::SetSpecificTrack(const char* track)
+void cmCTest::SetSpecificGroup(const char* group)
 {
-  if (!track) {
-    this->Impl->SpecificTrack.clear();
+  if (!group) {
+    this->Impl->SpecificGroup.clear();
     return;
   }
-  this->Impl->SpecificTrack = track;
+  this->Impl->SpecificGroup = group;
 }
 
 void cmCTest::SetFailover(bool failover)
@@ -2846,9 +2901,9 @@ int cmCTest::GetTestRepeat() const
   return this->Impl->RepeatTests;
 }
 
-bool cmCTest::GetRepeatUntilFail() const
+cmCTest::Rerun cmCTest::GetRerunMode() const
 {
-  return this->Impl->RepeatUntilFail;
+  return this->Impl->RerunMode;
 }
 
 void cmCTest::SetBuildID(const std::string& id)
@@ -2958,10 +3013,10 @@ bool cmCTest::RunCommand(std::vector<std::string> const& args,
     res = cmsysProcess_WaitForData(cp, &data, &length, nullptr);
     switch (res) {
       case cmsysProcess_Pipe_STDOUT:
-        tempOutput.insert(tempOutput.end(), data, data + length);
+        cmAppend(tempOutput, data, data + length);
         break;
       case cmsysProcess_Pipe_STDERR:
-        tempError.insert(tempError.end(), data, data + length);
+        cmAppend(tempError, data, data + length);
         break;
       default:
         done = true;
@@ -3078,11 +3133,11 @@ void cmCTest::Log(int logType, const char* file, int line, const char* msg,
         } else {
           *this->Impl->OutputLogFile << cmCTestStringLogType[logType];
         }
-        *this->Impl->OutputLogFile << "] " << std::endl << std::flush;
+        *this->Impl->OutputLogFile << "] " << std::endl;
       }
       *this->Impl->OutputLogFile << msg << std::flush;
       if (logType != this->Impl->OutputLogFileLastTag) {
-        *this->Impl->OutputLogFile << std::endl << std::flush;
+        *this->Impl->OutputLogFile << std::endl;
         this->Impl->OutputLogFileLastTag = logType;
       }
     }
@@ -3195,7 +3250,7 @@ void cmCTest::OutputTestErrors(std::vector<char> const& process_output)
   if (!process_output.empty()) {
     test_outputs.append(process_output.data(), process_output.size());
   }
-  cmCTestLog(this, HANDLER_OUTPUT, test_outputs << std::endl << std::flush);
+  cmCTestLog(this, HANDLER_OUTPUT, test_outputs << std::endl);
 }
 
 bool cmCTest::CompressString(std::string& str)

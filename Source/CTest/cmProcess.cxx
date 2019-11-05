@@ -2,63 +2,24 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmProcess.h"
 
+#include <csignal>
+#include <iostream>
+#include <string>
+
+#include "cmsys/Process.h"
+
+#include "cmAlgorithms.h"
 #include "cmCTest.h"
 #include "cmCTestRunTest.h"
 #include "cmCTestTestHandler.h"
-#include "cmsys/Process.h"
-
-#include <fcntl.h>
-#include <iostream>
-#include <signal.h>
-#include <string>
+#include "cmGetPipes.h"
+#include "cmStringAlgorithms.h"
 #if defined(_WIN32)
 #  include "cm_kwiml.h"
-#else
-#  include <unistd.h>
 #endif
 #include <utility>
 
 #define CM_PROCESS_BUF_SIZE 65536
-
-#if defined(_WIN32) && !defined(__CYGWIN__)
-#  include <io.h>
-
-static int cmProcessGetPipes(int* fds)
-{
-  SECURITY_ATTRIBUTES attr;
-  HANDLE readh, writeh;
-  attr.nLength = sizeof(attr);
-  attr.lpSecurityDescriptor = nullptr;
-  attr.bInheritHandle = FALSE;
-  if (!CreatePipe(&readh, &writeh, &attr, 0))
-    return uv_translate_sys_error(GetLastError());
-  fds[0] = _open_osfhandle((intptr_t)readh, 0);
-  fds[1] = _open_osfhandle((intptr_t)writeh, 0);
-  if (fds[0] == -1 || fds[1] == -1) {
-    CloseHandle(readh);
-    CloseHandle(writeh);
-    return uv_translate_sys_error(GetLastError());
-  }
-  return 0;
-}
-#else
-#  include <errno.h>
-
-static int cmProcessGetPipes(int* fds)
-{
-  if (pipe(fds) == -1) {
-    return uv_translate_sys_error(errno);
-  }
-
-  if (fcntl(fds[0], F_SETFD, FD_CLOEXEC) == -1 ||
-      fcntl(fds[1], F_SETFD, FD_CLOEXEC) == -1) {
-    close(fds[0]);
-    close(fds[1]);
-    return uv_translate_sys_error(errno);
-  }
-  return 0;
-}
-#endif
 
 cmProcess::cmProcess(cmCTestRunTest& runner)
   : Runner(runner)
@@ -120,7 +81,7 @@ bool cmProcess::StartProcess(uv_loop_t& loop, std::vector<size_t>* affinity)
   pipe_reader.init(loop, 0, this);
 
   int fds[2] = { -1, -1 };
-  status = cmProcessGetPipes(fds);
+  status = cmGetPipes(fds);
   if (status != 0) {
     cmCTestLog(this->Runner.GetCTest(), ERROR_MESSAGE,
                "Error initializing pipe: " << uv_strerror(status)
@@ -257,7 +218,7 @@ void cmProcess::OnRead(ssize_t nread, const uv_buf_t* buf)
   if (nread > 0) {
     std::string strdata;
     this->Conv.DecodeText(buf->base, static_cast<size_t>(nread), strdata);
-    this->Output.insert(this->Output.end(), strdata.begin(), strdata.end());
+    cmAppend(this->Output, strdata);
 
     while (this->Output.GetLine(line)) {
       this->Runner.CheckOutput(line);
@@ -735,8 +696,7 @@ std::string cmProcess::GetExitExceptionString()
 #    endif
 #  endif
     default:
-      exception_str = "Signal ";
-      exception_str += std::to_string(this->Signal);
+      exception_str = cmStrCat("Signal ", this->Signal);
   }
 #endif
   return exception_str;

@@ -210,13 +210,16 @@ if(MSVC)
   set(_MSVC_IDE_VERSION "")
   if(MSVC_VERSION GREATER_EQUAL 2000)
     message(WARNING "MSVC ${MSVC_VERSION} not yet supported.")
-  elseif(MSVC_VERSION_VERSION GREATER_EQUAL 143)
-    message(WARNING "MSVC toolset v${MSVC_VERSION_VERSION} not yet supported.")
+  elseif(MSVC_TOOLSET_VERSION GREATER_EQUAL 143)
+    message(WARNING "MSVC toolset v${MSVC_TOOLSET_VERSION} not yet supported.")
   elseif(MSVC_TOOLSET_VERSION EQUAL 142)
-    # FIXME: VS 2019 RC 4 uses VC141 but an update will fix it to be VC142.
-    set(MSVC_REDIST_NAME VC141)
+    set(MSVC_REDIST_NAME VC142)
     set(_MSVC_DLL_VERSION 140)
     set(_MSVC_IDE_VERSION 16)
+    if(MSVC_VERSION EQUAL 1920)
+      # VS2019 named this differently prior to update 1.
+      set(MSVC_REDIST_NAME VC141)
+    endif()
   elseif(MSVC_TOOLSET_VERSION EQUAL 141)
     set(MSVC_REDIST_NAME VC141)
     set(_MSVC_DLL_VERSION 140)
@@ -248,10 +251,19 @@ if(MSVC)
     endif()
     if(NOT vs VERSION_LESS 15)
       set(_vs_redist_paths "")
-      cmake_host_system_information(RESULT _vs_dir QUERY VS_${vs}_DIR) # undocumented query
-      if(IS_DIRECTORY "${_vs_dir}")
-        file(GLOB _vs_redist_paths "${_vs_dir}/VC/Redist/MSVC/*")
-      endif()
+      # The toolset and its redistributables may come with any VS version 15 or newer.
+      set(_MSVC_IDE_VERSIONS 16 15)
+      foreach(_vs_ver ${_MSVC_IDE_VERSIONS})
+        set(_vs_glob_redist_paths "")
+        cmake_host_system_information(RESULT _vs_dir QUERY VS_${_vs_ver}_DIR) # undocumented query
+        if(IS_DIRECTORY "${_vs_dir}")
+          file(GLOB _vs_glob_redist_paths "${_vs_dir}/VC/Redist/MSVC/*")
+          list(REVERSE _vs_glob_redist_paths)
+          list(APPEND _vs_redist_paths ${_vs_glob_redist_paths})
+        endif()
+        unset(_vs_glob_redist_paths)
+      endforeach()
+      unset(_MSVC_IDE_VERSIONS)
       unset(_vs_dir)
     else()
       get_filename_component(_vs_dir
@@ -276,6 +288,9 @@ if(MSVC)
         "${MSVC_CRT_DIR}/msvcp${v}.dll"
         )
       if(NOT vs VERSION_LESS 14)
+        if(EXISTS "${MSVC_CRT_DIR}/vcruntime${v}_1.dll")
+          list(APPEND __install__libs "${MSVC_CRT_DIR}/vcruntime${v}_1.dll")
+        endif()
         list(APPEND __install__libs
             "${MSVC_CRT_DIR}/vcruntime${v}.dll"
             "${MSVC_CRT_DIR}/concrt${v}.dll"
@@ -294,6 +309,9 @@ if(MSVC)
         "${MSVC_CRT_DIR}/msvcp${v}d.dll"
         )
       if(NOT vs VERSION_LESS 14)
+        if(EXISTS "${MSVC_CRT_DIR}/vcruntime${v}_1d.dll")
+          list(APPEND __install__libs "${MSVC_CRT_DIR}/vcruntime${v}_1d.dll")
+        endif()
         list(APPEND __install__libs
             "${MSVC_CRT_DIR}/vcruntime${v}d.dll"
             "${MSVC_CRT_DIR}/concrt${v}d.dll"

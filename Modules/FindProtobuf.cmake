@@ -207,9 +207,14 @@ function(protobuf_generate)
     get_filename_component(_basename ${_proto} NAME_WE)
     file(RELATIVE_PATH _rel_dir ${CMAKE_CURRENT_SOURCE_DIR} ${_abs_dir})
 
+    set(_possible_rel_dir)
+    if (NOT protobuf_generate_APPEND_PATH)
+        set(_possible_rel_dir ${_rel_dir}/)
+    endif()
+
     set(_generated_srcs)
     foreach(_ext ${protobuf_generate_GENERATE_EXTENSIONS})
-      list(APPEND _generated_srcs "${protobuf_generate_PROTOC_OUT_DIR}/${_basename}${_ext}")
+      list(APPEND _generated_srcs "${protobuf_generate_PROTOC_OUT_DIR}/${_possible_rel_dir}${_basename}${_ext}")
     endforeach()
 
     if(protobuf_generate_DESCRIPTORS AND protobuf_generate_LANGUAGE STREQUAL cpp)
@@ -516,6 +521,16 @@ if(Protobuf_INCLUDE_DIR)
             set_target_properties(protobuf::libprotobuf PROPERTIES
               IMPORTED_LOCATION_DEBUG "${Protobuf_LIBRARY_DEBUG}")
           endif()
+          if (Protobuf_VERSION VERSION_GREATER_EQUAL "3.6")
+            set_property(TARGET protobuf::libprotobuf APPEND PROPERTY
+              INTERFACE_COMPILE_FEATURES cxx_std_11
+            )
+          endif()
+          if (MSVC AND NOT Protobuf_USE_STATIC_LIBS)
+            set_property(TARGET protobuf::libprotobuf APPEND PROPERTY
+              INTERFACE_COMPILE_DEFINITIONS "PROTOBUF_USE_DLLS"
+            )
+          endif()
           if(UNIX AND TARGET Threads::Threads)
             set_property(TARGET protobuf::libprotobuf APPEND PROPERTY
                 INTERFACE_LINK_LIBRARIES Threads::Threads)
@@ -544,6 +559,11 @@ if(Protobuf_INCLUDE_DIR)
             set_target_properties(protobuf::libprotobuf-lite PROPERTIES
               IMPORTED_LOCATION_DEBUG "${Protobuf_LITE_LIBRARY_DEBUG}")
           endif()
+          if (MSVC AND NOT Protobuf_USE_STATIC_LIBS)
+            set_property(TARGET protobuf::libprotobuf-lite APPEND PROPERTY
+              INTERFACE_COMPILE_DEFINITIONS "PROTOBUF_USE_DLLS"
+            )
+          endif()
           if(UNIX AND TARGET Threads::Threads)
             set_property(TARGET protobuf::libprotobuf-lite APPEND PROPERTY
                 INTERFACE_LINK_LIBRARIES Threads::Threads)
@@ -571,6 +591,16 @@ if(Protobuf_INCLUDE_DIR)
               IMPORTED_CONFIGURATIONS DEBUG)
             set_target_properties(protobuf::libprotoc PROPERTIES
               IMPORTED_LOCATION_DEBUG "${Protobuf_PROTOC_LIBRARY_DEBUG}")
+          endif()
+          if (Protobuf_VERSION VERSION_GREATER_EQUAL "3.6")
+            set_property(TARGET protobuf::libprotoc APPEND PROPERTY
+              INTERFACE_COMPILE_FEATURES cxx_std_11
+            )
+          endif()
+          if (MSVC AND NOT Protobuf_USE_STATIC_LIBS)
+            set_property(TARGET protobuf::libprotoc APPEND PROPERTY
+              INTERFACE_COMPILE_DEFINITIONS "PROTOBUF_USE_DLLS"
+            )
           endif()
           if(UNIX AND TARGET Threads::Threads)
             set_property(TARGET protobuf::libprotoc APPEND PROPERTY

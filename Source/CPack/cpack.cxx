@@ -3,18 +3,6 @@
 
 #include "cmsys/CommandLineArguments.hxx"
 #include "cmsys/Encoding.hxx"
-#include <iostream>
-#include <map>
-#include <memory> // IWYU pragma: keep
-#include <sstream>
-#include <stddef.h>
-#include <string>
-#include <utility>
-#include <vector>
-
-#if defined(_WIN32) && defined(CMAKE_BUILD_WITH_CMAKE)
-#  include "cmsys/ConsoleBuf.hxx"
-#endif
 
 #include "cmCPackGenerator.h"
 #include "cmCPackGeneratorFactory.h"
@@ -26,22 +14,37 @@
 #include "cmMakefile.h"
 #include "cmState.h"
 #include "cmStateSnapshot.h"
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
 #include "cmake.h"
 
-static const char* cmDocumentationName[][2] = {
+#if defined(_WIN32) && !defined(CMAKE_BOOTSTRAP)
+#  include "cmsys/ConsoleBuf.hxx"
+#endif
+
+#include <cstddef>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+const char* cmDocumentationName[][2] = {
   { nullptr, "  cpack - Packaging driver provided by CMake." },
   { nullptr, nullptr }
 };
 
-static const char* cmDocumentationUsage[][2] = {
+const char* cmDocumentationUsage[][2] = {
   // clang-format off
   { nullptr, "  cpack [options]" },
   { nullptr, nullptr }
   // clang-format on
 };
 
-static const char* cmDocumentationOptions[][2] = {
+const char* cmDocumentationOptions[][2] = {
   { "-G <generators>", "Override/define CPACK_GENERATOR" },
   { "-C <Configuration>", "Specify the project configuration" },
   { "-D <var>=<value>", "Set a CPack variable." },
@@ -64,7 +67,7 @@ int cpackUnknownArgument(const char* /*unused*/, void* /*unused*/)
 
 struct cpackDefinitions
 {
-  typedef std::map<std::string, std::string> MapType;
+  using MapType = std::map<std::string, std::string>;
   MapType Map;
   cmCPackLog* Log;
 };
@@ -90,15 +93,17 @@ int cpackDefinitionArgument(const char* argument, const char* cValue,
   return 1;
 }
 
-static void cpackProgressCallback(const std::string& message, float /*unused*/)
+void cpackProgressCallback(const std::string& message, float /*unused*/)
 {
   std::cout << "-- " << message << std::endl;
 }
+} // namespace
 
 // this is CPack.
 int main(int argc, char const* const* argv)
 {
-#if defined(_WIN32) && defined(CMAKE_BUILD_WITH_CMAKE)
+  cmSystemTools::EnsureStdPipes();
+#if defined(_WIN32) && !defined(CMAKE_BOOTSTRAP)
   // Replace streambuf so we can output Unicode to console
   cmsys::ConsoleBuf::Manager consoleOut(std::cout);
   consoleOut.SetUTF8Pipes();
@@ -153,7 +158,7 @@ int main(int argc, char const* const* argv)
 
   cmsys::CommandLineArguments arg;
   arg.Initialize(argc, argv);
-  typedef cmsys::CommandLineArguments argT;
+  using argT = cmsys::CommandLineArguments;
   // Help arguments
   arg.AddArgument("--help", argT::NO_ARGUMENT, &help, "CPack help");
   arg.AddArgument("--help-full", argT::SPACE_ARGUMENT, &helpFull,
@@ -226,14 +231,13 @@ int main(int argc, char const* const* argv)
 
   bool cpackConfigFileSpecified = true;
   if (cpackConfigFile.empty()) {
-    cpackConfigFile = cmSystemTools::GetCurrentWorkingDirectory();
-    cpackConfigFile += "/CPackConfig.cmake";
+    cpackConfigFile = cmStrCat(cmSystemTools::GetCurrentWorkingDirectory(),
+                               "/CPackConfig.cmake");
     cpackConfigFileSpecified = false;
   }
 
   cmCPackGeneratorFactory generators;
   generators.SetLogger(&log);
-  cmCPackGenerator* cpackGenerator = nullptr;
 
   cmDocumentation doc;
   doc.addCPackStandardDocSections();
@@ -268,7 +272,7 @@ int main(int argc, char const* const* argv)
     }
 
     if (!cpackBuildConfig.empty()) {
-      globalMF.AddDefinition("CPACK_BUILD_CONFIG", cpackBuildConfig.c_str());
+      globalMF.AddDefinition("CPACK_BUILD_CONFIG", cpackBuildConfig);
     }
 
     if (cmSystemTools::FileExists(cpackConfigFile)) {
@@ -290,38 +294,41 @@ int main(int argc, char const* const* argv)
     }
 
     if (!generator.empty()) {
-      globalMF.AddDefinition("CPACK_GENERATOR", generator.c_str());
+      globalMF.AddDefinition("CPACK_GENERATOR", generator);
     }
     if (!cpackProjectName.empty()) {
-      globalMF.AddDefinition("CPACK_PACKAGE_NAME", cpackProjectName.c_str());
+      globalMF.AddDefinition("CPACK_PACKAGE_NAME", cpackProjectName);
     }
     if (!cpackProjectVersion.empty()) {
-      globalMF.AddDefinition("CPACK_PACKAGE_VERSION",
-                             cpackProjectVersion.c_str());
+      globalMF.AddDefinition("CPACK_PACKAGE_VERSION", cpackProjectVersion);
     }
     if (!cpackProjectVendor.empty()) {
-      globalMF.AddDefinition("CPACK_PACKAGE_VENDOR",
-                             cpackProjectVendor.c_str());
+      globalMF.AddDefinition("CPACK_PACKAGE_VENDOR", cpackProjectVendor);
     }
     // if this is not empty it has been set on the command line
     // go for it. Command line override values set in config file.
     if (!cpackProjectDirectory.empty()) {
-      globalMF.AddDefinition("CPACK_PACKAGE_DIRECTORY",
-                             cpackProjectDirectory.c_str());
+      globalMF.AddDefinition("CPACK_PACKAGE_DIRECTORY", cpackProjectDirectory);
     }
     // The value has not been set on the command line
     else {
       // get a default value (current working directory)
       cpackProjectDirectory = cmsys::SystemTools::GetCurrentWorkingDirectory();
-      // use default value iff no value has been provided by the config file
+      // use default value if no value has been provided by the config file
       if (!globalMF.IsSet("CPACK_PACKAGE_DIRECTORY")) {
         globalMF.AddDefinition("CPACK_PACKAGE_DIRECTORY",
-                               cpackProjectDirectory.c_str());
+                               cpackProjectDirectory);
       }
     }
     for (auto const& cd : definitions.Map) {
-      globalMF.AddDefinition(cd.first, cd.second.c_str());
+      globalMF.AddDefinition(cd.first, cd.second);
     }
+
+    // Force CPACK_PACKAGE_DIRECTORY as absolute path
+    cpackProjectDirectory = globalMF.GetDefinition("CPACK_PACKAGE_DIRECTORY");
+    cpackProjectDirectory =
+      cmSystemTools::CollapseFullPath(cpackProjectDirectory);
+    globalMF.AddDefinition("CPACK_PACKAGE_DIRECTORY", cpackProjectDirectory);
 
     const char* cpackModulesPath = globalMF.GetDefinition("CPACK_MODULE_PATH");
     if (cpackModulesPath) {
@@ -332,8 +339,7 @@ int main(int argc, char const* const* argv)
       cmCPack_Log(&log, cmCPackLog::LOG_ERROR,
                   "CPack generator not specified" << std::endl);
     } else {
-      std::vector<std::string> generatorsVector;
-      cmSystemTools::ExpandListArgument(genList, generatorsVector);
+      std::vector<std::string> generatorsVector = cmExpandedList(genList);
       for (std::string const& gen : generatorsVector) {
         cmMakefile::ScopePushPop raii(&globalMF);
         cmMakefile* mf = &globalMF;
@@ -360,7 +366,8 @@ int main(int argc, char const* const* argv)
           parsed = 0;
         }
         if (parsed) {
-          cpackGenerator = generators.NewGenerator(gen);
+          std::unique_ptr<cmCPackGenerator> cpackGenerator =
+            generators.NewGenerator(gen);
           if (cpackGenerator) {
             cpackGenerator->SetTrace(trace);
             cpackGenerator->SetTraceExpand(traceExpand);
@@ -424,7 +431,7 @@ int main(int argc, char const* const* argv)
               std::ostringstream ostr;
               ostr << projVersionMajor << "." << projVersionMinor << "."
                    << projVersionPatch;
-              mf->AddDefinition("CPACK_PACKAGE_VERSION", ostr.str().c_str());
+              mf->AddDefinition("CPACK_PACKAGE_VERSION", ostr.str());
             }
 
             int res = cpackGenerator->DoPackage();

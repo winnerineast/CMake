@@ -2,20 +2,24 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmOutputRequiredFilesCommand.h"
 
-#include "cmsys/FStream.hxx"
-#include "cmsys/RegularExpression.hxx"
+#include <cstdio>
 #include <map>
+#include <set>
 #include <utility>
 
+#include "cmsys/FStream.hxx"
+#include "cmsys/RegularExpression.hxx"
+
 #include "cmAlgorithms.h"
+#include "cmExecutionStatus.h"
 #include "cmGeneratorExpression.h"
 #include "cmMakefile.h"
 #include "cmSourceFile.h"
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
 #include "cmTarget.h"
 
-class cmExecutionStatus;
-
+namespace {
 /** \class cmDependInformation
  * \brief Store dependency information for a single source file.
  *
@@ -33,7 +37,7 @@ public:
   /**
    * The set of files on which this one depends.
    */
-  typedef std::set<cmDependInformation*> DependencySetType;
+  using DependencySetType = std::set<cmDependInformation*>;
   DependencySetType DependencySet;
 
   /**
@@ -111,8 +115,7 @@ public:
     // Now extract any include paths from the targets
     std::set<std::string> uniqueIncludes;
     std::vector<std::string> orderedAndUniqueIncludes;
-    cmTargets& targets = this->Makefile->GetTargets();
-    for (auto const& target : targets) {
+    for (auto const& target : this->Makefile->GetTargets()) {
       const char* incDirProp =
         target.second.GetProperty("INCLUDE_DIRECTORIES");
       if (!incDirProp) {
@@ -122,8 +125,7 @@ public:
       std::string incDirs = cmGeneratorExpression::Preprocess(
         incDirProp, cmGeneratorExpression::StripAllGeneratorExpressions);
 
-      std::vector<std::string> includes;
-      cmSystemTools::ExpandListArgument(incDirs, includes);
+      std::vector<std::string> includes = cmExpandedList(incDirs);
 
       for (std::string& path : includes) {
         this->Makefile->ExpandVariablesInString(path);
@@ -193,10 +195,8 @@ protected:
         // see if the include matches the regular expression
         if (!this->IncludeFileRegularExpression.find(includeFile)) {
           if (this->Verbose) {
-            std::string message = "Skipping ";
-            message += includeFile;
-            message += " for file ";
-            message += info->FullPath;
+            std::string message =
+              cmStrCat("Skipping ", includeFile, " for file ", info->FullPath);
             cmSystemTools::Error(message);
           }
           continue;
@@ -215,10 +215,8 @@ protected:
           if (cmSystemTools::FileExists(cxxFile)) {
             found = true;
           }
-          for (std::string path : this->IncludeDirectories) {
-            path = path + "/";
-            path = path + cxxFile;
-            if (cmSystemTools::FileExists(path)) {
+          for (std::string const& path : this->IncludeDirectories) {
+            if (cmSystemTools::FileExists(cmStrCat(path, "/", cxxFile))) {
               found = true;
             }
           }
@@ -227,10 +225,8 @@ protected:
             if (cmSystemTools::FileExists(cxxFile)) {
               found = true;
             }
-            for (std::string path : this->IncludeDirectories) {
-              path = path + "/";
-              path = path + cxxFile;
-              if (cmSystemTools::FileExists(path)) {
+            for (std::string const& path : this->IncludeDirectories) {
+              if (cmSystemTools::FileExists(cmStrCat(path, "/", cxxFile))) {
                 found = true;
               }
             }
@@ -240,10 +236,8 @@ protected:
             if (cmSystemTools::FileExists(cxxFile)) {
               found = true;
             }
-            for (std::string path : this->IncludeDirectories) {
-              path = path + "/";
-              path = path + cxxFile;
-              if (cmSystemTools::FileExists(path)) {
+            for (std::string const& path : this->IncludeDirectories) {
+              if (cmSystemTools::FileExists(cmStrCat(path, "/", cxxFile))) {
                 found = true;
               }
             }
@@ -253,10 +247,8 @@ protected:
             if (cmSystemTools::FileExists(cxxFile)) {
               found = true;
             }
-            for (std::string path : this->IncludeDirectories) {
-              path = path + "/";
-              path = path + cxxFile;
-              if (cmSystemTools::FileExists(path)) {
+            for (std::string const& path : this->IncludeDirectories) {
+              if (cmSystemTools::FileExists(cmStrCat(path, "/", cxxFile))) {
                 found = true;
               }
             }
@@ -293,8 +285,8 @@ protected:
     // Make sure we don't visit the same file more than once.
     info->DependDone = true;
 
-    const char* path = info->FullPath.c_str();
-    if (!path) {
+    const std::string& path = info->FullPath;
+    if (path.empty()) {
       cmSystemTools::Error(
         "Attempt to find dependencies for file without path!");
       return;
@@ -334,16 +326,16 @@ protected:
       cmSourceFile* srcFile = this->Makefile->GetSource(
         cmSystemTools::GetFilenameWithoutExtension(path));
       if (srcFile) {
-        if (srcFile->GetFullPath() == path) {
+        if (srcFile->ResolveFullPath() == path) {
           found = true;
         } else {
           // try to guess which include path to use
           for (std::string incpath : this->IncludeDirectories) {
             if (!incpath.empty() && incpath.back() != '/') {
-              incpath = incpath + "/";
+              incpath += "/";
             }
-            incpath = incpath + path;
-            if (srcFile->GetFullPath() == incpath) {
+            incpath += path;
+            if (srcFile->ResolveFullPath() == incpath) {
               // set the path to the guessed path
               info->FullPath = incpath;
               found = true;
@@ -356,7 +348,7 @@ protected:
     if (!found) {
       // Couldn't find any dependency information.
       if (this->ComplainFileRegularExpression.find(info->IncludeName)) {
-        cmSystemTools::Error("error cannot find dependencies for ", path);
+        cmSystemTools::Error("error cannot find dependencies for " + path);
       } else {
         // Destroy the name of the file so that it won't be output as a
         // dependency.
@@ -376,8 +368,7 @@ protected:
     std::string fullPath = this->FullPath(file, extraPath);
 
     // Try to find the file's instance of cmDependInformation.
-    DependInformationMapType::const_iterator result =
-      this->DependInformationMap.find(fullPath);
+    auto result = this->DependInformationMap.find(fullPath);
     if (result != this->DependInformationMap.end()) {
       // Found an instance, return it.
       return result->second;
@@ -407,7 +398,7 @@ protected:
 
     if (m != this->DirectoryToFileToPathMap.end()) {
       FileToPathMapType& map = m->second;
-      FileToPathMapType::iterator p = map.find(fname);
+      auto p = map.find(fname);
       if (p != map.end()) {
         return p->second;
       }
@@ -421,9 +412,9 @@ protected:
 
     for (std::string path : this->IncludeDirectories) {
       if (!path.empty() && path.back() != '/') {
-        path = path + "/";
+        path += "/";
       }
-      path = path + fname;
+      path += fname;
       if (cmSystemTools::FileExists(path, true) &&
           !cmSystemTools::FileIsDirectory(path)) {
         std::string fp = cmSystemTools::CollapseFullPath(path);
@@ -455,53 +446,55 @@ protected:
   cmsys::RegularExpression IncludeFileRegularExpression;
   cmsys::RegularExpression ComplainFileRegularExpression;
   std::vector<std::string> IncludeDirectories;
-  typedef std::map<std::string, std::string> FileToPathMapType;
-  typedef std::map<std::string, FileToPathMapType>
-    DirectoryToFileToPathMapType;
-  typedef std::map<std::string, cmDependInformation*> DependInformationMapType;
+  using FileToPathMapType = std::map<std::string, std::string>;
+  using DirectoryToFileToPathMapType =
+    std::map<std::string, FileToPathMapType>;
+  using DependInformationMapType = std::map<std::string, cmDependInformation*>;
   DependInformationMapType DependInformationMap;
   DirectoryToFileToPathMapType DirectoryToFileToPathMap;
 };
 
+void ListDependencies(cmDependInformation const* info, FILE* fout,
+                      std::set<cmDependInformation const*>* visited);
+}
+
 // cmOutputRequiredFilesCommand
-bool cmOutputRequiredFilesCommand::InitialPass(
-  std::vector<std::string> const& args, cmExecutionStatus&)
+bool cmOutputRequiredFilesCommand(std::vector<std::string> const& args,
+                                  cmExecutionStatus& status)
 {
   if (args.size() != 2) {
-    this->SetError("called with incorrect number of arguments");
+    status.SetError("called with incorrect number of arguments");
     return false;
   }
 
   // store the arg for final pass
-  this->File = args[0];
-  this->OutputFile = args[1];
+  const std::string& file = args[0];
+  const std::string& outputFile = args[1];
 
   // compute the list of files
   cmLBDepend md;
-  md.SetMakefile(this->Makefile);
-  md.AddSearchPath(this->Makefile->GetCurrentSourceDirectory());
+  md.SetMakefile(&status.GetMakefile());
+  md.AddSearchPath(status.GetMakefile().GetCurrentSourceDirectory());
   // find the depends for a file
-  const cmDependInformation* info = md.FindDependencies(this->File.c_str());
+  const cmDependInformation* info = md.FindDependencies(file.c_str());
   if (info) {
     // write them out
-    FILE* fout = cmsys::SystemTools::Fopen(this->OutputFile, "w");
+    FILE* fout = cmsys::SystemTools::Fopen(outputFile, "w");
     if (!fout) {
-      std::string err = "Can not open output file: ";
-      err += this->OutputFile;
-      this->SetError(err);
+      status.SetError(cmStrCat("Can not open output file: ", outputFile));
       return false;
     }
     std::set<cmDependInformation const*> visited;
-    this->ListDependencies(info, fout, &visited);
+    ListDependencies(info, fout, &visited);
     fclose(fout);
   }
 
   return true;
 }
 
-void cmOutputRequiredFilesCommand::ListDependencies(
-  cmDependInformation const* info, FILE* fout,
-  std::set<cmDependInformation const*>* visited)
+namespace {
+void ListDependencies(cmDependInformation const* info, FILE* fout,
+                      std::set<cmDependInformation const*>* visited)
 {
   // add info to the visited set
   visited->insert(info);
@@ -516,7 +509,8 @@ void cmOutputRequiredFilesCommand::ListDependencies(
           fprintf(fout, "%s\n", d->FullPath.c_str());
         }
       }
-      this->ListDependencies(d, fout, visited);
+      ListDependencies(d, fout, visited);
     }
   }
+}
 }

@@ -2,14 +2,16 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmCoreTryCompile.h"
 
-#include "cmsys/Directory.hxx"
+#include <cstdio>
+#include <cstring>
 #include <set>
 #include <sstream>
-#include <stdio.h>
-#include <string.h>
 #include <utility>
 
-#include "cmAlgorithms.h"
+#include "cmsys/Directory.hxx"
+
+#include "cm_static_string_view.hxx"
+
 #include "cmExportTryCompileFileGenerator.h"
 #include "cmGlobalGenerator.h"
 #include "cmMakefile.h"
@@ -17,6 +19,7 @@
 #include "cmOutputConverter.h"
 #include "cmPolicies.h"
 #include "cmState.h"
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
 #include "cmTarget.h"
 #include "cmVersion.h"
@@ -42,6 +45,8 @@ static std::string const kCMAKE_LINK_SEARCH_END_STATIC =
   "CMAKE_LINK_SEARCH_END_STATIC";
 static std::string const kCMAKE_LINK_SEARCH_START_STATIC =
   "CMAKE_LINK_SEARCH_START_STATIC";
+static std::string const kCMAKE_MSVC_RUNTIME_LIBRARY_DEFAULT =
+  "CMAKE_MSVC_RUNTIME_LIBRARY_DEFAULT";
 static std::string const kCMAKE_OSX_ARCHITECTURES = "CMAKE_OSX_ARCHITECTURES";
 static std::string const kCMAKE_OSX_DEPLOYMENT_TARGET =
   "CMAKE_OSX_DEPLOYMENT_TARGET";
@@ -51,6 +56,8 @@ static std::string const kCMAKE_POSITION_INDEPENDENT_CODE =
 static std::string const kCMAKE_SYSROOT = "CMAKE_SYSROOT";
 static std::string const kCMAKE_SYSROOT_COMPILE = "CMAKE_SYSROOT_COMPILE";
 static std::string const kCMAKE_SYSROOT_LINK = "CMAKE_SYSROOT_LINK";
+static std::string const kCMAKE_Swift_COMPILER_TARGET =
+  "CMAKE_Swift_COMPILER_TARGET";
 static std::string const kCMAKE_TRY_COMPILE_OSX_ARCHITECTURES =
   "CMAKE_TRY_COMPILE_OSX_ARCHITECTURES";
 static std::string const kCMAKE_TRY_COMPILE_PLATFORM_VARIABLES =
@@ -119,8 +126,8 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
     }
   }
 
-  const char* sourceDirectory = argv[2].c_str();
-  const char* projectName = nullptr;
+  std::string sourceDirectory = argv[2];
+  std::string projectName;
   std::string targetName;
   std::vector<std::string> cmakeFlags(1, "CMAKE_FLAGS"); // fake argv[0]
   std::vector<std::string> compileDefs;
@@ -231,11 +238,11 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
     } else if (doing == DoingCMakeFlags) {
       cmakeFlags.push_back(argv[i]);
     } else if (doing == DoingCompileDefinitions) {
-      cmSystemTools::ExpandListArgument(argv[i], compileDefs);
+      cmExpandList(argv[i], compileDefs);
     } else if (doing == DoingLinkOptions) {
       linkOptions.push_back(argv[i]);
     } else if (doing == DoingLinkLibraries) {
-      libsToLink += "\"" + cmSystemTools::TrimWhitespace(argv[i]) + "\" ";
+      libsToLink += "\"" + cmTrimWhitespace(argv[i]) + "\" ";
       if (cmTarget* tgt = this->Makefile->FindTargetToUse(argv[i])) {
         switch (tgt->GetType()) {
           case cmStateEnums::SHARED_LIBRARY:
@@ -306,7 +313,7 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
       doing = DoingNone;
     } else if (i == 3) {
       this->SrcFileSignature = false;
-      projectName = argv[i].c_str();
+      projectName = argv[i];
     } else if (i == 4 && !this->SrcFileSignature) {
       targetName = argv[i];
     } else {
@@ -408,8 +415,7 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
   // compute the binary dir when TRY_COMPILE is called with a src file
   // signature
   if (this->SrcFileSignature) {
-    this->BinaryDirectory += "/CMakeFiles";
-    this->BinaryDirectory += "/CMakeTmp";
+    this->BinaryDirectory += "/CMakeFiles/CMakeTmp";
   } else {
     // only valid for srcfile signatures
     if (!compileDefs.empty()) {
@@ -477,7 +483,7 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
 
     // we need to create a directory and CMakeLists file etc...
     // first create the directories
-    sourceDirectory = this->BinaryDirectory.c_str();
+    sourceDirectory = this->BinaryDirectory;
 
     // now create a CMakeLists.txt file in that directory
     FILE* fout = cmsys::SystemTools::Fopen(outFileName, "w");
@@ -500,11 +506,18 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
       fprintf(fout, "set(CMAKE_MODULE_PATH \"%s\")\n", def);
     }
 
+    /* Set MSVC runtime library policy to match our selection.  */
+    if (const char* msvcRuntimeLibraryDefault =
+          this->Makefile->GetDefinition(kCMAKE_MSVC_RUNTIME_LIBRARY_DEFAULT)) {
+      fprintf(fout, "cmake_policy(SET CMP0091 %s)\n",
+              *msvcRuntimeLibraryDefault ? "NEW" : "OLD");
+    }
+
     std::string projectLangs;
     for (std::string const& li : testLangs) {
       projectLangs += " " + li;
       std::string rulesOverrideBase = "CMAKE_USER_MAKE_RULES_OVERRIDE";
-      std::string rulesOverrideLang = rulesOverrideBase + "_" + li;
+      std::string rulesOverrideLang = cmStrCat(rulesOverrideBase, "_", li);
       if (const char* rulesOverridePath =
             this->Makefile->GetDefinition(rulesOverrideLang)) {
         fprintf(fout, "set(%s \"%s\")\n", rulesOverrideLang.c_str(),
@@ -564,7 +577,8 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
         std::string const cfg =
           !tcConfig.empty() ? cmSystemTools::UpperCase(tcConfig) : cfgDefault;
         for (std::string const& li : testLangs) {
-          std::string const langFlagsCfg = "CMAKE_" + li + "_FLAGS_" + cfg;
+          std::string const langFlagsCfg =
+            cmStrCat("CMAKE_", li, "_FLAGS_", cfg);
           const char* flagsCfg = this->Makefile->GetDefinition(langFlagsCfg);
           fprintf(fout, "set(%s %s)\n", langFlagsCfg.c_str(),
                   cmOutputConverter::EscapeForCMake(flagsCfg ? flagsCfg : "")
@@ -659,12 +673,13 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
       vars.insert(kCMAKE_SYSROOT);
       vars.insert(kCMAKE_SYSROOT_COMPILE);
       vars.insert(kCMAKE_SYSROOT_LINK);
+      vars.insert(kCMAKE_Swift_COMPILER_TARGET);
       vars.insert(kCMAKE_WARN_DEPRECATED);
+      vars.emplace("CMAKE_MSVC_RUNTIME_LIBRARY"_s);
 
       if (const char* varListStr = this->Makefile->GetDefinition(
             kCMAKE_TRY_COMPILE_PLATFORM_VARIABLES)) {
-        std::vector<std::string> varList;
-        cmSystemTools::ExpandListArgument(varListStr, varList);
+        std::vector<std::string> varList = cmExpandedList(varListStr);
         vars.insert(varList.begin(), varList.end());
       }
 
@@ -921,7 +936,7 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
                                      cmStateEnums::INTERNAL);
 
   if (!outputVariable.empty()) {
-    this->Makefile->AddDefinition(outputVariable, output.c_str());
+    this->Makefile->AddDefinition(outputVariable, output);
   }
 
   if (this->SrcFileSignature) {
@@ -939,7 +954,7 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
              << "  '" << copyFile << "'\n";
         /* clang-format on */
         if (!this->FindErrorMessage.empty()) {
-          emsg << this->FindErrorMessage.c_str();
+          emsg << this->FindErrorMessage;
         }
         if (copyFileError.empty()) {
           this->Makefile->IssueMessage(MessageType::FATAL_ERROR, emsg.str());
@@ -950,8 +965,7 @@ int cmCoreTryCompile::TryCompileCode(std::vector<std::string> const& argv,
     }
 
     if (!copyFileError.empty()) {
-      this->Makefile->AddDefinition(copyFileError,
-                                    copyFileErrorMessage.c_str());
+      this->Makefile->AddDefinition(copyFileError, copyFileErrorMessage);
     }
   }
   return res;
@@ -1035,21 +1049,24 @@ void cmCoreTryCompile::FindOutputFile(const std::string& targetName,
     this->Makefile->GetDefinition("CMAKE_TRY_COMPILE_CONFIGURATION");
   // if a config was specified try that first
   if (config && config[0]) {
-    std::string tmp = "/";
-    tmp += config;
+    std::string tmp = cmStrCat('/', config);
     searchDirs.push_back(std::move(tmp));
   }
   searchDirs.emplace_back("/Debug");
 #if defined(__APPLE__)
-  std::string app = "/Debug/" + targetName + ".app";
+  std::string app = "/" + targetName + ".app";
+  if (config && config[0]) {
+    std::string tmp = cmStrCat('/', config, app);
+    searchDirs.push_back(std::move(tmp));
+  }
+  std::string tmp = "/Debug" + app;
+  searchDirs.emplace_back(std::move(tmp));
   searchDirs.push_back(std::move(app));
 #endif
   searchDirs.emplace_back("/Development");
 
   for (std::string const& sdir : searchDirs) {
-    std::string command = this->BinaryDirectory;
-    command += sdir;
-    command += tmpOutputFile;
+    std::string command = cmStrCat(this->BinaryDirectory, sdir, tmpOutputFile);
     if (cmSystemTools::FileExists(command)) {
       this->OutputFile = cmSystemTools::CollapseFullPath(command);
       return;

@@ -5,11 +5,11 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
-#include "cmCursesForm.h"
-#include "cmCursesStandardIncludes.h"
-
 #include <string>
 #include <vector>
+
+#include "cmCursesForm.h"
+#include "cmCursesStandardIncludes.h"
 
 class cmCursesLongMessageForm : public cmCursesForm
 {
@@ -24,6 +24,10 @@ public:
   // Description:
   // Handle user input.
   void HandleInput() override;
+
+  // Description:
+  // Scroll down to the end of the content
+  void ScrollDown();
 
   // Description:
   // Display form. Use a window of size width x height, starting

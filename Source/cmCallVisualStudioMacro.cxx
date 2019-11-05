@@ -4,6 +4,7 @@
 
 #include <sstream>
 
+#include "cmStringAlgorithms.h"
 #include "cmSystemTools.h"
 
 #if defined(_MSC_VER)
@@ -61,7 +62,8 @@ HRESULT InstanceCallMacro(IDispatch* vsIDE, const std::string& macro,
 
   if (0 != vsIDE) {
     DISPID dispid = (DISPID)-1;
-    OLECHAR* name = L"ExecuteCommand";
+    wchar_t execute_command[] = L"ExecuteCommand";
+    OLECHAR* name = execute_command;
 
     hr =
       vsIDE->GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT, &dispid);
@@ -119,7 +121,8 @@ HRESULT InstanceCallMacro(IDispatch* vsIDE, const std::string& macro,
         }
         oss << "  dwHelpContext: " << excep.dwHelpContext << std::endl;
         oss << "  pvReserved: " << excep.pvReserved << std::endl;
-        oss << "  pfnDeferredFillIn: " << excep.pfnDeferredFillIn << std::endl;
+        oss << "  pfnDeferredFillIn: "
+            << reinterpret_cast<void*>(excep.pfnDeferredFillIn) << std::endl;
         oss << "  scode: " << excep.scode << std::endl;
       }
 
@@ -140,7 +143,8 @@ HRESULT GetSolutionObject(IDispatch* vsIDE, IDispatchPtr& vsSolution)
 
   if (0 != vsIDE) {
     DISPID dispid = (DISPID)-1;
-    OLECHAR* name = L"Solution";
+    wchar_t solution[] = L"Solution";
+    OLECHAR* name = solution;
 
     hr =
       vsIDE->GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT, &dispid);
@@ -183,7 +187,8 @@ HRESULT GetSolutionFullName(IDispatch* vsSolution, std::string& fullName)
 
   if (0 != vsSolution) {
     DISPID dispid = (DISPID)-1;
-    OLECHAR* name = L"FullName";
+    wchar_t full_name[] = L"FullName";
+    OLECHAR* name = full_name;
 
     hr = vsSolution->GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT,
                                    &dispid);
@@ -324,8 +329,7 @@ HRESULT FindVisualStudioInstances(const std::string& slnFile,
   if (SUCCEEDED(hr)) {
     std::map<std::string, IUnknownPtr>::iterator it;
     for (it = mrot.begin(); it != mrot.end(); ++it) {
-      if (cmSystemTools::StringStartsWith(it->first.c_str(),
-                                          "!VisualStudio.DTE.")) {
+      if (cmHasLiteralPrefix(it->first, "!VisualStudio.DTE.")) {
         IDispatchPtr disp(it->second);
         if (disp != (IDispatch*)0) {
           std::string slnName;

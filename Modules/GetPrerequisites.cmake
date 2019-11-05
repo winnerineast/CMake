@@ -5,6 +5,10 @@
 GetPrerequisites
 ----------------
 
+.. deprecated:: 3.16
+
+  Use :command:`file(GET_RUNTIME_DEPENDENCIES)` instead.
+
 Functions to analyze and list executable file prerequisites.
 
 This module provides functions to list the .dll, .dylib or .so files
@@ -169,17 +173,11 @@ Possible types are:
    other
 #]=======================================================================]
 
+cmake_policy(PUSH)
+cmake_policy(SET CMP0057 NEW) # if IN_LIST
+
 function(gp_append_unique list_var value)
-  set(contains 0)
-
-  foreach(item ${${list_var}})
-    if(item STREQUAL "${value}")
-      set(contains 1)
-      break()
-    endif()
-  endforeach()
-
-  if(NOT contains)
+  if(NOT value IN_LIST ${list_var})
     set(${list_var} ${${list_var}} "${value}" PARENT_SCOPE)
   endif()
 endfunction()
@@ -712,7 +710,9 @@ function(get_prerequisites target prerequisites_var exclude_system recurse exepa
       find_program(gp_dumpbin "dumpbin" PATHS ${gp_cmd_paths})
       if(gp_dumpbin)
         set(gp_tool "dumpbin")
-      else() # Try harder. Maybe we're on MinGW
+      elseif(CMAKE_OBJDUMP) # Try harder. Maybe we're on MinGW
+        set(gp_tool "${CMAKE_OBJDUMP}")
+      else()
         set(gp_tool "objdump")
       endif()
     endif()
@@ -729,7 +729,7 @@ function(get_prerequisites target prerequisites_var exclude_system recurse exepa
 
   if(gp_tool MATCHES "ldd$")
     set(gp_cmd_args "")
-    set(gp_regex "^[\t ]*[^\t ]+ => ([^\t\(]+) .*${eol_char}$")
+    set(gp_regex "^[\t ]*[^\t ]+ =>[\t ]+([^\t\(]+)( \(.+\))?${eol_char}$")
     set(gp_regex_error "not found${eol_char}$")
     set(gp_regex_fallback "^[\t ]*([^\t ]+) => ([^\t ]+).*${eol_char}$")
     set(gp_regex_cmp_count 1)
@@ -1043,3 +1043,5 @@ function(list_prerequisites_by_glob glob_arg glob_exp)
     endif()
   endforeach()
 endfunction()
+
+cmake_policy(POP)

@@ -52,6 +52,16 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang"
 endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL SunPro)
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.15)
+    # SunPro 5.14 accepts -std=c++14 and compiles two features but does
+    # not define __cplusplus to a value different than with -std=c++11.
+    list(REMOVE_ITEM CXX_non_features
+      cxx_aggregate_default_initializers
+      cxx_digit_separators
+    )
+  endif()
+
+  # FIXME: Do any of these work correctly on SunPro 5.13 or above?
   list(REMOVE_ITEM CXX_non_features
     cxx_attribute_deprecated
     cxx_contextual_conversions
@@ -120,6 +130,12 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+  if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"
+      AND CMAKE_CXX_SIMULATE_VERSION VERSION_LESS 19.10)
+    list(REMOVE_ITEM CXX_non_features
+      cxx_relaxed_constexpr
+      )
+  endif()
   if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16.0)
     if (CMAKE_CXX_COMIPLER_VERSION VERSION_EQUAL 15.0)
       list(REMOVE_ITEM CXX_non_features

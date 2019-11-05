@@ -5,14 +5,18 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
+#include <cstddef>
 #include <functional>
 #include <map>
-#include <memory> // IWYU pragma: keep
+#include <memory>
 #include <set>
+#include <stack>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
+#include "cmGeneratedFileStream.h"
 #include "cmInstalledFile.h"
 #include "cmListFileCache.h"
 #include "cmMessageType.h"
@@ -20,7 +24,7 @@
 #include "cmStateSnapshot.h"
 #include "cmStateTypes.h"
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
+#if !defined(CMAKE_BOOTSTRAP)
 #  include "cm_jsoncpp_value.h"
 #endif
 
@@ -96,6 +100,19 @@ public:
     FIND_PACKAGE_MODE
   };
 
+  /** \brief Define log level constants. */
+  enum LogLevel
+  {
+    LOG_UNDEFINED,
+    LOG_ERROR,
+    LOG_WARNING,
+    LOG_NOTICE,
+    LOG_STATUS,
+    LOG_VERBOSE,
+    LOG_DEBUG,
+    LOG_TRACE
+  };
+
   struct GeneratorInfo
   {
     std::string name;
@@ -108,7 +125,18 @@ public:
     bool isAlias;
   };
 
-  typedef std::map<std::string, cmInstalledFile> InstalledFilesMap;
+  struct FileExtensions
+  {
+    bool Test(std::string const& ext) const
+    {
+      return (this->unordered.find(ext) != this->unordered.end());
+    }
+
+    std::vector<std::string> ordered;
+    std::unordered_set<std::string> unordered;
+  };
+
+  using InstalledFilesMap = std::map<std::string, cmInstalledFile>;
 
   static const int NO_BUILD_PARALLEL_LEVEL = -1;
   static const int DEFAULT_BUILD_PARALLEL_LEVEL = 0;
@@ -121,11 +149,11 @@ public:
   cmake(cmake const&) = delete;
   cmake& operator=(cmake const&) = delete;
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
+#if !defined(CMAKE_BOOTSTRAP)
   Json::Value ReportVersionJson() const;
-  Json::Value ReportCapabilitiesJson(bool haveServerMode) const;
+  Json::Value ReportCapabilitiesJson() const;
 #endif
-  std::string ReportCapabilities(bool haveServerMode) const;
+  std::string ReportCapabilities() const;
 
   //@{
   /**
@@ -201,40 +229,61 @@ public:
   void SetGeneratorInstance(std::string const& instance)
   {
     this->GeneratorInstance = instance;
+    this->GeneratorInstanceSet = true;
   }
 
   //! Set the name of the selected generator-specific platform.
   void SetGeneratorPlatform(std::string const& ts)
   {
     this->GeneratorPlatform = ts;
+    this->GeneratorPlatformSet = true;
   }
 
   //! Set the name of the selected generator-specific toolset.
   void SetGeneratorToolset(std::string const& ts)
   {
     this->GeneratorToolset = ts;
+    this->GeneratorToolsetSet = true;
   }
 
   const std::vector<std::string>& GetSourceExtensions() const
   {
-    return this->SourceFileExtensions;
+    return this->SourceFileExtensions.ordered;
   }
 
   bool IsSourceExtension(const std::string& ext) const
   {
-    return this->SourceFileExtensionsSet.find(ext) !=
-      this->SourceFileExtensionsSet.end();
+    return this->SourceFileExtensions.Test(ext);
   }
 
   const std::vector<std::string>& GetHeaderExtensions() const
   {
-    return this->HeaderFileExtensions;
+    return this->HeaderFileExtensions.ordered;
   }
 
   bool IsHeaderExtension(const std::string& ext) const
   {
-    return this->HeaderFileExtensionsSet.find(ext) !=
-      this->HeaderFileExtensionsSet.end();
+    return this->HeaderFileExtensions.Test(ext);
+  }
+
+  const std::vector<std::string>& GetCudaExtensions() const
+  {
+    return this->CudaFileExtensions.ordered;
+  }
+
+  bool IsCudaExtension(const std::string& ext) const
+  {
+    return this->CudaFileExtensions.Test(ext);
+  }
+
+  const std::vector<std::string>& GetFortranExtensions() const
+  {
+    return this->FortranFileExtensions.ordered;
+  }
+
+  bool IsFortranExtension(const std::string& ext) const
+  {
+    return this->FortranFileExtensions.Test(ext);
   }
 
   // Strips the extension (if present and known) from a filename
@@ -263,6 +312,9 @@ public:
    */
   int GetSystemInformation(std::vector<std::string>&);
 
+  //! Parse environment variables
+  void LoadEnvironmentPresets();
+
   //! Parse command line arguments
   void SetArgs(const std::vector<std::string>& args);
 
@@ -286,9 +338,9 @@ public:
   //! this is called by generators to update the progress
   void UpdateProgress(const std::string& msg, float prog);
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
+#if !defined(CMAKE_BOOTSTRAP)
   //! Get the variable watch object
-  cmVariableWatch* GetVariableWatch() { return this->VariableWatch; }
+  cmVariableWatch* GetVariableWatch() { return this->VariableWatch.get(); }
 #endif
 
   std::vector<cmDocumentationEntry> GetGeneratorsDocumentation();
@@ -329,13 +381,43 @@ public:
   /**
    * Get the file comparison class
    */
-  cmFileTimeCache* GetFileTimeCache() { return this->FileTimeCache; }
+  cmFileTimeCache* GetFileTimeCache() { return this->FileTimeCache.get(); }
 
-  // Do we want debug output during the cmake run.
+  bool WasLogLevelSetViaCLI() const { return this->LogLevelWasSetViaCLI; }
+
+  //! Get the selected log level for `message()` commands during the cmake run.
+  LogLevel GetLogLevel() const { return this->MessageLogLevel; }
+  void SetLogLevel(LogLevel level) { this->MessageLogLevel = level; }
+  static LogLevel StringToLogLevel(const std::string& levelStr);
+
+  bool HasCheckInProgress() const
+  {
+    return !this->CheckInProgressMessages.empty();
+  }
+  std::size_t GetCheckInProgressSize() const
+  {
+    return this->CheckInProgressMessages.size();
+  }
+  std::string GetTopCheckInProgressMessage()
+  {
+    auto message = this->CheckInProgressMessages.top();
+    this->CheckInProgressMessages.pop();
+    return message;
+  }
+  void PushCheckInProgressMessage(std::string message)
+  {
+    this->CheckInProgressMessages.emplace(std::move(message));
+  }
+
+  //! Do we want debug output during the cmake run.
   bool GetDebugOutput() { return this->DebugOutput; }
   void SetDebugOutputOn(bool b) { this->DebugOutput = b; }
 
-  // Do we want trace output during the cmake run.
+  //! Should `message` command display context.
+  bool GetShowLogContext() const { return this->LogContext; }
+  void SetShowLogContext(bool b) { this->LogContext = b; }
+
+  //! Do we want trace output during the cmake run.
   bool GetTrace() { return this->Trace; }
   void SetTrace(bool b) { this->Trace = b; }
   bool GetTraceExpand() { return this->TraceExpand; }
@@ -348,6 +430,9 @@ public:
   {
     return this->TraceOnlyThisSources;
   }
+  cmGeneratedFileStream& GetTraceFile() { return this->TraceFile; }
+  void SetTraceFile(std::string const& file);
+
   bool GetWarnUninitialized() { return this->WarnUninitialized; }
   void SetWarnUninitialized(bool b) { this->WarnUninitialized = b; }
   bool GetWarnUnused() { return this->WarnUnused; }
@@ -372,31 +457,31 @@ public:
     return this->CMakeEditCommand;
   }
 
-  cmMessenger* GetMessenger() const;
+  cmMessenger* GetMessenger() const { return this->Messenger.get(); }
 
-  /*
+  /**
    * Get the state of the suppression of developer (author) warnings.
    * Returns false, by default, if developer warnings should be shown, true
    * otherwise.
    */
   bool GetSuppressDevWarnings() const;
-  /*
+  /**
    * Set the state of the suppression of developer (author) warnings.
    */
   void SetSuppressDevWarnings(bool v);
 
-  /*
+  /**
    * Get the state of the suppression of deprecated warnings.
    * Returns false, by default, if deprecated warnings should be shown, true
    * otherwise.
    */
   bool GetSuppressDeprecatedWarnings() const;
-  /*
+  /**
    * Set the state of the suppression of deprecated warnings.
    */
   void SetSuppressDeprecatedWarnings(bool v);
 
-  /*
+  /**
    * Get the state of treating developer (author) warnings as errors.
    * Returns false, by default, if warnings should not be treated as errors,
    * true otherwise.
@@ -407,7 +492,7 @@ public:
    */
   void SetDevWarningsAsErrors(bool v);
 
-  /*
+  /**
    * Get the state of treating deprecated warnings as errors.
    * Returns false, by default, if warnings should not be treated as errors,
    * true otherwise.
@@ -435,7 +520,7 @@ public:
   void UnwatchUnusedCli(const std::string& var);
   void WatchUnusedCli(const std::string& var);
 
-  cmState* GetState() const { return this->State; }
+  cmState* GetState() const { return this->State.get(); }
   void SetCurrentSnapshot(cmStateSnapshot const& snapshot)
   {
     this->CurrentSnapshot = snapshot;
@@ -446,21 +531,24 @@ protected:
   void RunCheckForUnusedVariables();
   int HandleDeleteCacheVariables(const std::string& var);
 
-  typedef std::vector<cmGlobalGeneratorFactory*> RegisteredGeneratorsVector;
+  using RegisteredGeneratorsVector = std::vector<cmGlobalGeneratorFactory*>;
   RegisteredGeneratorsVector Generators;
-  typedef std::vector<cmExternalMakefileProjectGeneratorFactory*>
-    RegisteredExtraGeneratorsVector;
+  using RegisteredExtraGeneratorsVector =
+    std::vector<cmExternalMakefileProjectGeneratorFactory*>;
   RegisteredExtraGeneratorsVector ExtraGenerators;
   void AddScriptingCommands();
   void AddProjectCommands();
   void AddDefaultGenerators();
   void AddDefaultExtraGenerators();
 
-  cmGlobalGenerator* GlobalGenerator;
+  cmGlobalGenerator* GlobalGenerator = nullptr;
   std::map<std::string, DiagLevel> DiagLevels;
   std::string GeneratorInstance;
   std::string GeneratorPlatform;
   std::string GeneratorToolset;
+  bool GeneratorInstanceSet = false;
+  bool GeneratorPlatformSet = false;
+  bool GeneratorToolsetSet = false;
 
   //! read in a cmake list file to initialize the cache
   void ReadListFile(const std::vector<std::string>& args,
@@ -477,24 +565,25 @@ protected:
    */
   int CheckBuildSystem();
 
-  void SetDirectoriesFromFile(const char* arg);
+  void SetDirectoriesFromFile(const std::string& arg);
 
   //! Make sure all commands are what they say they are and there is no
   /// macros.
   void CleanupCommandsAndMacros();
 
-  void GenerateGraphViz(const char* fileName) const;
+  void GenerateGraphViz(const std::string& fileName) const;
 
 private:
   ProgressCallbackType ProgressCallback;
-  WorkingMode CurrentWorkingMode;
-  bool DebugOutput;
-  bool Trace;
-  bool TraceExpand;
-  bool WarnUninitialized;
-  bool WarnUnused;
-  bool WarnUnusedCli;
-  bool CheckSystemVars;
+  WorkingMode CurrentWorkingMode = NORMAL_MODE;
+  bool DebugOutput = false;
+  bool Trace = false;
+  bool TraceExpand = false;
+  cmGeneratedFileStream TraceFile;
+  bool WarnUninitialized = false;
+  bool WarnUnused = false;
+  bool WarnUnusedCli = true;
+  bool CheckSystemVars = false;
   std::map<std::string, bool> UsedCliVariables;
   std::string CMakeEditCommand;
   std::string CXXEnvironment;
@@ -503,30 +592,37 @@ private:
   std::string CheckStampFile;
   std::string CheckStampList;
   std::string VSSolutionFile;
-  std::vector<std::string> SourceFileExtensions;
-  std::unordered_set<std::string> SourceFileExtensionsSet;
-  std::vector<std::string> HeaderFileExtensions;
-  std::unordered_set<std::string> HeaderFileExtensionsSet;
-  bool ClearBuildSystem;
-  bool DebugTryCompile;
-  cmFileTimeCache* FileTimeCache;
+  std::string EnvironmentGenerator;
+  FileExtensions SourceFileExtensions;
+  FileExtensions HeaderFileExtensions;
+  FileExtensions CudaFileExtensions;
+  FileExtensions FortranFileExtensions;
+  bool ClearBuildSystem = false;
+  bool DebugTryCompile = false;
+  std::unique_ptr<cmFileTimeCache> FileTimeCache;
   std::string GraphVizFile;
   InstalledFilesMap InstalledFiles;
 
-#if defined(CMAKE_BUILD_WITH_CMAKE)
-  cmVariableWatch* VariableWatch;
+#if !defined(CMAKE_BOOTSTRAP)
+  std::unique_ptr<cmVariableWatch> VariableWatch;
   std::unique_ptr<cmFileAPI> FileAPI;
 #endif
 
-  cmState* State;
+  std::unique_ptr<cmState> State;
   cmStateSnapshot CurrentSnapshot;
-  cmMessenger* Messenger;
+  std::unique_ptr<cmMessenger> Messenger;
 
   std::vector<std::string> TraceOnlyThisSources;
 
+  LogLevel MessageLogLevel = LogLevel::LOG_STATUS;
+  bool LogLevelWasSetViaCLI = false;
+  bool LogContext = false;
+
+  std::stack<std::string> CheckInProgressMessages;
+
   void UpdateConversionPathTable();
 
-  // Print a list of valid generators to stderr.
+  //! Print a list of valid generators to stderr.
   void PrintGeneratorList();
 
   std::unique_ptr<cmGlobalGenerator> EvaluateDefaultGlobalGenerator();

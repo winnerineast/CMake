@@ -267,7 +267,30 @@ class cmMakefile;
          15, 0, cmPolicies::WARN)                                             \
   SELECT(POLICY, CMP0090,                                                     \
          "export(PACKAGE) does not populate package registry by default.", 3, \
-         15, 0, cmPolicies::WARN)
+         15, 0, cmPolicies::WARN)                                             \
+  SELECT(POLICY, CMP0091,                                                     \
+         "MSVC runtime library flags are selected by an abstraction.", 3, 15, \
+         0, cmPolicies::WARN)                                                 \
+  SELECT(POLICY, CMP0092,                                                     \
+         "MSVC warning flags are not in CMAKE_<LANG>_FLAGS by default.", 3,   \
+         15, 0, cmPolicies::WARN)                                             \
+  SELECT(POLICY, CMP0093, "FindBoost reports Boost_VERSION in x.y.z format.", \
+         3, 15, 0, cmPolicies::WARN)                                          \
+  SELECT(POLICY, CMP0094,                                                     \
+         "FindPython3,  FindPython2 and FindPyton use "                       \
+         "LOCATION for lookup strategy.",                                     \
+         3, 15, 0, cmPolicies::WARN)                                          \
+  SELECT(POLICY, CMP0095,                                                     \
+         "RPATH entries are properly escaped in the intermediary CMake "      \
+         "install script.",                                                   \
+         3, 16, 0, cmPolicies::WARN)                                          \
+  SELECT(POLICY, CMP0096,                                                     \
+         "project() preserves leading zeros in version components.", 3, 16,   \
+         0, cmPolicies::WARN)                                                 \
+  SELECT(POLICY, CMP0097,                                                     \
+         "ExternalProject_Add with GIT_SUBMODULES \"\" initializes no "       \
+         "submodules.",                                                       \
+         3, 16, 0, cmPolicies::WARN)
 
 #define CM_SELECT_ID(F, A1, A2, A3, A4, A5, A6) F(A1)
 #define CM_FOR_EACH_POLICY_ID(POLICY)                                         \
@@ -295,7 +318,8 @@ class cmMakefile;
   F(CMP0073)                                                                  \
   F(CMP0076)                                                                  \
   F(CMP0081)                                                                  \
-  F(CMP0083)
+  F(CMP0083)                                                                  \
+  F(CMP0095)
 
 /** \class cmPolicies
  * \brief Handles changes in CMake behavior and policies

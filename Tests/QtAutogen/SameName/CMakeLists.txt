@@ -18,9 +18,11 @@ add_executable(sameName
   ccc/data.qrc
   item.cpp
   object.h
+  object.hh
   object.h++
   object.hpp
   object.hxx
+  object_upper_ext.H
   data.qrc
   main.cpp
 )
@@ -37,7 +39,7 @@ if (QT_TEST_VERSION EQUAL 4)
 else()
   set(rccCompress "--compress")
 endif()
-set_target_properties(sameName PROPERTIES AUTORCC_OPTIONS "${rccCompress};0" )
-set_source_files_properties(aaa/data.qrc PROPERTIES AUTORCC_OPTIONS "${rccCompress};1" )
-set_source_files_properties(bbb/data.qrc PROPERTIES AUTORCC_OPTIONS "${rccCompress};2" )
-set_source_files_properties(ccc/data.qrc PROPERTIES AUTORCC_OPTIONS "${rccCompress};3" )
+set_target_properties(sameName PROPERTIES AUTORCC_OPTIONS "${rccCompress};1" )
+set_source_files_properties(aaa/data.qrc PROPERTIES AUTORCC_OPTIONS "${rccCompress};2" )
+set_source_files_properties(bbb/data.qrc PROPERTIES AUTORCC_OPTIONS "${rccCompress};3" )
+set_source_files_properties(ccc/data.qrc PROPERTIES AUTORCC_OPTIONS "${rccCompress};4" )

@@ -5,11 +5,11 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
+#include <cstddef>
 #include <iosfwd>
-#include <stddef.h>
 #include <string>
 
-#if !defined(CMAKE_BUILD_WITH_CMAKE)
+#if defined(CMAKE_BOOTSTRAP)
 #  error "cmArchiveWrite not allowed during bootstrap build!"
 #endif
 
@@ -49,7 +49,8 @@ public:
     CompressGZip,
     CompressBZip2,
     CompressLZMA,
-    CompressXZ
+    CompressXZ,
+    CompressZstd
   };
 
   /** Construct with output stream to which to write archive.  */

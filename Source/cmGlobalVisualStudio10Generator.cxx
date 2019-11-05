@@ -2,6 +2,14 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmGlobalVisualStudio10Generator.h"
 
+#include <algorithm>
+
+#include "cmsys/FStream.hxx"
+#include "cmsys/Glob.hxx"
+#include "cmsys/RegularExpression.hxx"
+
+#include "cm_jsoncpp_reader.h"
+
 #include "cmAlgorithms.h"
 #include "cmDocumentationEntry.h"
 #include "cmGeneratorTarget.h"
@@ -13,17 +21,20 @@
 #include "cmVisualStudioSlnData.h"
 #include "cmVisualStudioSlnParser.h"
 #include "cmXMLWriter.h"
-#include "cm_jsoncpp_reader.h"
 #include "cmake.h"
-
-#include "cmsys/FStream.hxx"
-#include "cmsys/Glob.hxx"
-#include "cmsys/RegularExpression.hxx"
-
-#include <algorithm>
 
 static const char vs10generatorName[] = "Visual Studio 10 2010";
 static std::map<std::string, std::vector<cmIDEFlagTable>> loadedFlagJsonFiles;
+
+static void ConvertToWindowsSlashes(std::string& s)
+{
+  // first convert all of the slashes
+  for (auto& ch : s) {
+    if (ch == '/') {
+      ch = '\\';
+    }
+  }
+}
 
 // Map generator name without year to name with year.
 static const char* cmVS10GenName(const std::string& name, std::string& genName)
@@ -192,7 +203,7 @@ static void cmCudaToolVersion(std::string& s)
 }
 
 bool cmGlobalVisualStudio10Generator::SetGeneratorToolset(
-  std::string const& ts, cmMakefile* mf)
+  std::string const& ts, bool build, cmMakefile* mf)
 {
   if (this->SystemIsWindowsCE && ts.empty() &&
       this->DefaultPlatformToolset.empty()) {
@@ -207,7 +218,11 @@ bool cmGlobalVisualStudio10Generator::SetGeneratorToolset(
     return false;
   }
 
-  if (!this->FindVCTargetsPath(mf)) {
+  if (build) {
+    return true;
+  }
+
+  if (this->CustomVCTargetsPath.empty() && !this->FindVCTargetsPath(mf)) {
     return false;
   }
 
@@ -232,7 +247,15 @@ bool cmGlobalVisualStudio10Generator::SetGeneratorToolset(
   if (this->GeneratorToolsetCuda.empty()) {
     // Find the highest available version of the CUDA tools.
     std::vector<std::string> cudaTools;
-    std::string const bcDir = this->VCTargetsPath + "/BuildCustomizations";
+    std::string bcDir;
+    if (this->GeneratorToolsetCudaCustomDir.empty()) {
+      bcDir = this->VCTargetsPath + "/BuildCustomizations";
+    } else {
+      bcDir = this->GetPlatformToolsetCudaCustomDirString() +
+        "CUDAVisualStudioIntegration\\extras\\"
+        "visual_studio_integration\\MSBuildExtensions";
+      cmSystemTools::ConvertToUnixSlashes(bcDir);
+    }
     cmsys::Glob gl;
     gl.SetRelative(bcDir.c_str());
     if (gl.FindFiles(bcDir + "/CUDA *.props")) {
@@ -243,6 +266,24 @@ bool cmGlobalVisualStudio10Generator::SetGeneratorToolset(
       std::sort(cudaTools.begin(), cudaTools.end(),
                 cmSystemTools::VersionCompareGreater);
       this->GeneratorToolsetCuda = cudaTools.at(0);
+    } else if (!this->GeneratorToolsetCudaCustomDir.empty()) {
+      // Generate an error if Visual Studio integration files are not found
+      // inside of custom cuda toolset.
+      std::ostringstream e;
+      /* clang-format off */
+      e <<
+        "Generator\n"
+        "  " << this->GetName() << "\n"
+        "given toolset\n"
+        "  cuda=" << this->GeneratorToolsetCudaCustomDir << "\n"
+        "cannot detect Visual Studio integration files in path\n"
+        "  " << bcDir;
+
+      /* clang-format on */
+      mf->IssueMessage(MessageType::FATAL_ERROR, e.str());
+
+      // Clear the configured tool-set
+      this->GeneratorToolsetCuda.clear();
     }
   }
 
@@ -319,13 +360,21 @@ bool cmGlobalVisualStudio10Generator::SetGeneratorToolset(
   if (const char* cuda = this->GetPlatformToolsetCuda()) {
     mf->AddDefinition("CMAKE_VS_PLATFORM_TOOLSET_CUDA", cuda);
   }
+  if (const char* cudaDir = this->GetPlatformToolsetCudaCustomDir()) {
+    mf->AddDefinition("CMAKE_VS_PLATFORM_TOOLSET_CUDA_CUSTOM_DIR", cudaDir);
+  }
+  if (const char* vcTargetsDir = this->GetCustomVCTargetsPath()) {
+    mf->AddDefinition("CMAKE_VS_PLATFORM_TOOLSET_VCTARGETS_CUSTOM_DIR",
+                      vcTargetsDir);
+  }
+
   return true;
 }
 
 bool cmGlobalVisualStudio10Generator::ParseGeneratorToolset(
   std::string const& ts, cmMakefile* mf)
 {
-  std::vector<std::string> const fields = cmSystemTools::tokenize(ts, ",");
+  std::vector<std::string> const fields = cmTokenize(ts, ",");
   std::vector<std::string>::const_iterator fi = fields.begin();
   if (fi == fields.end()) {
     return true;
@@ -395,11 +444,26 @@ bool cmGlobalVisualStudio10Generator::ProcessGeneratorToolsetField(
   std::string const& key, std::string const& value)
 {
   if (key == "cuda") {
-    this->GeneratorToolsetCuda = value;
+    /* test if cuda toolset is path to custom dir or cuda version */
+    auto pos = value.find_first_not_of("0123456789.");
+    if (pos != std::string::npos) {
+      this->GeneratorToolsetCudaCustomDir = value;
+      /* ensure trailing backslash for easy path joining */
+      if (this->GeneratorToolsetCudaCustomDir.back() != '\\') {
+        this->GeneratorToolsetCudaCustomDir.push_back('\\');
+      }
+    } else {
+      this->GeneratorToolsetCuda = value;
+    }
     return true;
   }
   if (key == "version") {
     this->GeneratorToolsetVersion = value;
+    return true;
+  }
+  if (key == "VCTargetsPath") {
+    this->CustomVCTargetsPath = value;
+    ConvertToWindowsSlashes(this->CustomVCTargetsPath);
     return true;
   }
   return false;
@@ -445,7 +509,7 @@ bool cmGlobalVisualStudio10Generator::InitializeSystem(cmMakefile* mf)
     this->DefaultPlatformName = "Tegra-Android";
     this->DefaultPlatformToolset = "Default";
     this->NsightTegraVersion = v;
-    mf->AddDefinition("CMAKE_VS_NsightTegra_VERSION", v.c_str());
+    mf->AddDefinition("CMAKE_VS_NsightTegra_VERSION", v);
   }
 
   return true;
@@ -563,6 +627,14 @@ void cmGlobalVisualStudio10Generator::EnableLanguage(
   cmGlobalVisualStudio8Generator::EnableLanguage(lang, mf, optional);
 }
 
+const char* cmGlobalVisualStudio10Generator::GetCustomVCTargetsPath() const
+{
+  if (this->CustomVCTargetsPath.empty()) {
+    return nullptr;
+  }
+  return this->CustomVCTargetsPath.c_str();
+}
+
 const char* cmGlobalVisualStudio10Generator::GetPlatformToolset() const
 {
   std::string const& toolset = this->GetPlatformToolsetString();
@@ -643,6 +715,21 @@ cmGlobalVisualStudio10Generator::GetPlatformToolsetCudaString() const
   return this->GeneratorToolsetCuda;
 }
 
+const char* cmGlobalVisualStudio10Generator::GetPlatformToolsetCudaCustomDir()
+  const
+{
+  if (!this->GeneratorToolsetCudaCustomDir.empty()) {
+    return this->GeneratorToolsetCudaCustomDir.c_str();
+  }
+  return nullptr;
+}
+
+std::string const&
+cmGlobalVisualStudio10Generator::GetPlatformToolsetCudaCustomDirString() const
+{
+  return this->GeneratorToolsetCudaCustomDir;
+}
+
 bool cmGlobalVisualStudio10Generator::IsDefaultToolset(
   const std::string&) const
 {
@@ -659,8 +746,7 @@ bool cmGlobalVisualStudio10Generator::FindMakeProgram(cmMakefile* mf)
   if (!this->cmGlobalVisualStudio8Generator::FindMakeProgram(mf)) {
     return false;
   }
-  mf->AddDefinition("CMAKE_VS_MSBUILD_COMMAND",
-                    this->GetMSBuildCommand().c_str());
+  mf->AddDefinition("CMAKE_VS_MSBUILD_COMMAND", this->GetMSBuildCommand());
   return true;
 }
 
@@ -679,9 +765,9 @@ std::string cmGlobalVisualStudio10Generator::FindMSBuildCommand()
   std::string mskey;
 
   // Search in standard location.
-  mskey = "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\MSBuild\\ToolsVersions\\";
-  mskey += this->GetToolsVersion();
-  mskey += ";MSBuildToolsPath";
+  mskey = cmStrCat(
+    "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\MSBuild\\ToolsVersions\\",
+    this->GetToolsVersion(), ";MSBuildToolsPath");
   if (cmSystemTools::ReadRegistryValue(mskey.c_str(), msbuild,
                                        cmSystemTools::KeyWOW64_32)) {
     cmSystemTools::ConvertToUnixSlashes(msbuild);
@@ -721,8 +807,8 @@ bool cmGlobalVisualStudio10Generator::FindVCTargetsPath(cmMakefile* mf)
     // In a try-compile we are given the outer CMakeFiles directory.
     wd = this->ConfiguredFilesPath;
   } else {
-    wd = this->GetCMakeInstance()->GetHomeOutputDirectory();
-    wd += "/CMakeFiles";
+    wd = cmStrCat(this->GetCMakeInstance()->GetHomeOutputDirectory(),
+                  "/CMakeFiles");
   }
   wd += "/";
   wd += cmVersion::GetCMakeVersion();
@@ -784,11 +870,11 @@ bool cmGlobalVisualStudio10Generator::FindVCTargetsPath(cmMakefile* mf)
       if (this->GetSystemName() == "WindowsPhone") {
         cmXMLElement(epg, "ApplicationType").Content("Windows Phone");
         cmXMLElement(epg, "ApplicationTypeRevision")
-          .Content(this->GetSystemVersion());
+          .Content(this->GetApplicationTypeRevision());
       } else if (this->GetSystemName() == "WindowsStore") {
         cmXMLElement(epg, "ApplicationType").Content("Windows Store");
         cmXMLElement(epg, "ApplicationTypeRevision")
-          .Content(this->GetSystemVersion());
+          .Content(this->GetApplicationTypeRevision());
       }
       if (!this->WindowsTargetPlatformVersion.empty()) {
         cmXMLElement(epg, "WindowsTargetPlatformVersion")
@@ -906,8 +992,7 @@ cmGlobalVisualStudio10Generator::GenerateBuildCommand(
   {
     std::string slnFile;
     if (!projectDir.empty()) {
-      slnFile = projectDir;
-      slnFile += "/";
+      slnFile = cmStrCat(projectDir, '/');
     }
     slnFile += projectName;
     slnFile += ".sln";
@@ -954,8 +1039,7 @@ cmGlobalVisualStudio10Generator::GenerateBuildCommand(
       makeCommand.Add(std::string(projectName) + ".sln");
       makeCommand.Add("/t:Clean");
     } else {
-      std::string targetProject(tname);
-      targetProject += ".vcxproj";
+      std::string targetProject = cmStrCat(tname, ".vcxproj");
       if (targetProject.find('/') == std::string::npos) {
         // it might be in a subdir
         if (cmSlnProjectEntry const* proj = slnData.GetProjectByName(tname)) {
@@ -1038,14 +1122,12 @@ std::string cmGlobalVisualStudio10Generator::GenerateRuleFile(
 {
   // The VS 10 generator needs to create the .rule files on disk.
   // Hide them away under the CMakeFiles directory.
-  std::string ruleDir = this->GetCMakeInstance()->GetHomeOutputDirectory();
-  ruleDir += "/CMakeFiles";
-  ruleDir += "/";
-  ruleDir += cmSystemTools::ComputeStringMD5(
-    cmSystemTools::GetFilenamePath(output).c_str());
-  std::string ruleFile = ruleDir + "/";
-  ruleFile += cmSystemTools::GetFilenameName(output);
-  ruleFile += ".rule";
+  std::string ruleDir = cmStrCat(
+    this->GetCMakeInstance()->GetHomeOutputDirectory(), "/CMakeFiles/",
+    cmSystemTools::ComputeStringMD5(
+      cmSystemTools::GetFilenamePath(output).c_str()));
+  std::string ruleFile =
+    cmStrCat(ruleDir, '/', cmSystemTools::GetFilenameName(output), ".rule");
   return ruleFile;
 }
 
@@ -1110,6 +1192,15 @@ std::string cmGlobalVisualStudio10Generator::GetInstalledNsightTegraVersion()
     "Version",
     version, cmSystemTools::KeyWOW64_32);
   return version;
+}
+
+std::string cmGlobalVisualStudio10Generator::GetApplicationTypeRevision() const
+{
+  // Return the first two '.'-separated components of the Windows version.
+  std::string::size_type end1 = this->SystemVersion.find('.');
+  std::string::size_type end2 =
+    end1 == std::string::npos ? end1 : this->SystemVersion.find('.', end1 + 1);
+  return this->SystemVersion.substr(0, end2);
 }
 
 static std::string cmLoadFlagTableString(Json::Value entry, const char* field)

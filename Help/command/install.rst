@@ -126,6 +126,8 @@ project.  There are several kinds of target files that may be installed:
   marked with the ``FRAMEWORK`` property on macOS (see ``FRAMEWORK``
   below.) For DLL platforms (all Windows-based systems including
   Cygwin), the DLL import library is treated as an ``ARCHIVE`` target.
+  On AIX, the linker import file created for executables with
+  :prop_tgt:`ENABLE_EXPORTS` is treated as an ``ARCHIVE`` target.
 
 ``LIBRARY``
   Module libraries are always treated as ``LIBRARY`` targets. For non-
@@ -660,9 +662,9 @@ and installed by the current project.  For example, the code
 
   install(TARGETS myexe EXPORT myproj DESTINATION bin)
   install(EXPORT myproj NAMESPACE mp_ DESTINATION lib/myproj)
-  install(EXPORT_ANDROID_MK myexp DESTINATION share/ndk-modules)
+  install(EXPORT_ANDROID_MK myproj DESTINATION share/ndk-modules)
 
-will install the executable myexe to ``<prefix>/bin`` and code to import
+will install the executable ``myexe`` to ``<prefix>/bin`` and code to import
 it in the file ``<prefix>/lib/myproj/myproj.cmake`` and
 ``<prefix>/share/ndk-modules/Android.mk``.  An outside project
 may load this file with the include command and reference the ``myexe``
