@@ -6,18 +6,20 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
-#include <cstddef>
+#include <cstddef> // IWYU pragma: keep
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <list>
-#include <memory>
 #include <sstream>
 #include <stack>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <cm/memory>
+#include <cmext/algorithm>
 
 #include "cmsys/FStream.hxx"
 #include "cmsys/SystemInformation.hxx"
@@ -27,7 +29,6 @@
 #include "cm_uv.h"
 
 #include "cmAffinity.h"
-#include "cmAlgorithms.h"
 #include "cmCTest.h"
 #include "cmCTestBinPacker.h"
 #include "cmCTestRunTest.h"
@@ -136,11 +137,11 @@ void cmCTestMultiProcessHandler::RunTests()
   uv_run(&this->Loop, UV_RUN_DEFAULT);
   uv_loop_close(&this->Loop);
 
-  if (!this->StopTimePassed) {
+  if (!this->StopTimePassed && !this->CheckStopOnFailure()) {
     assert(this->Completed == this->Total);
     assert(this->Tests.empty());
   }
-  assert(this->AllHardwareAvailable());
+  assert(this->AllResourcesAvailable());
 
   this->MarkFinished();
   this->UpdateCostData();
@@ -170,74 +171,105 @@ bool cmCTestMultiProcessHandler::StartTestProcess(int test)
   this->EraseTest(test);
   this->RunningCount += GetProcessorsUsed(test);
 
-  cmCTestRunTest* testRun = new cmCTestRunTest(*this);
-  if (this->CTest->GetRerunMode() != cmCTest::Rerun::Never) {
-    testRun->SetRerunMode(this->CTest->GetRerunMode());
-    testRun->SetNumberOfRuns(this->CTest->GetTestRepeat());
+  auto testRun = cm::make_unique<cmCTestRunTest>(*this);
+
+  if (this->RepeatMode != cmCTest::Repeat::Never) {
+    testRun->SetRepeatMode(this->RepeatMode);
+    testRun->SetNumberOfRuns(this->RepeatCount);
   }
   testRun->SetIndex(test);
   testRun->SetTestProperties(this->Properties[test]);
-  if (this->TestHandler->UseHardwareSpec) {
-    testRun->SetUseAllocatedHardware(true);
-    testRun->SetAllocatedHardware(this->AllocatedHardware[test]);
+  if (this->TestHandler->UseResourceSpec) {
+    testRun->SetUseAllocatedResources(true);
+    testRun->SetAllocatedResources(this->AllocatedResources[test]);
   }
 
   // Find any failed dependencies for this test. We assume the more common
   // scenario has no failed tests, so make it the outer loop.
   for (std::string const& f : *this->Failed) {
-    if (cmContains(this->Properties[test]->RequireSuccessDepends, f)) {
+    if (cm::contains(this->Properties[test]->RequireSuccessDepends, f)) {
       testRun->AddFailedDependency(f);
     }
   }
 
   // Always lock the resources we'll be using, even if we fail to set the
   // working directory because FinishTestProcess() will try to unlock them
-  this->AllocateResources(test);
+  this->LockResources(test);
 
-  if (!this->TestsHaveSufficientHardware[test]) {
-    testRun->StartFailure("Insufficient hardware");
-    this->FinishTestProcess(testRun, false);
+  if (!this->ResourceAllocationErrors[test].empty()) {
+    std::ostringstream e;
+    e << "Insufficient resources for test " << this->Properties[test]->Name
+      << ":\n\n";
+    for (auto const& it : this->ResourceAllocationErrors[test]) {
+      switch (it.second) {
+        case ResourceAllocationError::NoResourceType:
+          e << "  Test requested resources of type '" << it.first
+            << "' which does not exist\n";
+          break;
+
+        case ResourceAllocationError::InsufficientResources:
+          e << "  Test requested resources of type '" << it.first
+            << "' in the following amounts:\n";
+          for (auto const& group : this->Properties[test]->ResourceGroups) {
+            for (auto const& requirement : group) {
+              if (requirement.ResourceType == it.first) {
+                e << "    " << requirement.SlotsNeeded
+                  << (requirement.SlotsNeeded == 1 ? " slot\n" : " slots\n");
+              }
+            }
+          }
+          e << "  but only the following units were available:\n";
+          for (auto const& res :
+               this->ResourceAllocator.GetResources().at(it.first)) {
+            e << "    '" << res.first << "': " << res.second.Total
+              << (res.second.Total == 1 ? " slot\n" : " slots\n");
+          }
+          break;
+      }
+      e << "\n";
+    }
+    e << "Resource spec file:\n\n  " << this->TestHandler->ResourceSpecFile;
+    cmCTestRunTest::StartFailure(std::move(testRun), e.str(),
+                                 "Insufficient resources");
     return false;
   }
 
   cmWorkingDirectory workdir(this->Properties[test]->Directory);
   if (workdir.Failed()) {
-    testRun->StartFailure("Failed to change working directory to " +
-                          this->Properties[test]->Directory + " : " +
-                          std::strerror(workdir.GetLastResult()));
-  } else {
-    if (testRun->StartTest(this->Completed, this->Total)) {
-      // Ownership of 'testRun' has moved to another structure.
-      // When the test finishes, FinishTestProcess will be called.
-      return true;
-    }
+    cmCTestRunTest::StartFailure(std::move(testRun),
+                                 "Failed to change working directory to " +
+                                   this->Properties[test]->Directory + " : " +
+                                   std::strerror(workdir.GetLastResult()),
+                                 "Failed to change working directory");
+    return false;
   }
 
-  // Pass ownership of 'testRun'.
-  this->FinishTestProcess(testRun, false);
-  return false;
+  // Ownership of 'testRun' has moved to another structure.
+  // When the test finishes, FinishTestProcess will be called.
+  return cmCTestRunTest::StartTest(std::move(testRun), this->Completed,
+                                   this->Total);
 }
 
-bool cmCTestMultiProcessHandler::AllocateHardware(int index)
+bool cmCTestMultiProcessHandler::AllocateResources(int index)
 {
-  if (!this->TestHandler->UseHardwareSpec) {
+  if (!this->TestHandler->UseResourceSpec) {
     return true;
   }
 
   std::map<std::string, std::vector<cmCTestBinPackerAllocation>> allocations;
-  if (!this->TryAllocateHardware(index, allocations)) {
+  if (!this->TryAllocateResources(index, allocations)) {
     return false;
   }
 
-  auto& allocatedHardware = this->AllocatedHardware[index];
-  allocatedHardware.resize(this->Properties[index]->Processes.size());
+  auto& allocatedResources = this->AllocatedResources[index];
+  allocatedResources.resize(this->Properties[index]->ResourceGroups.size());
   for (auto const& it : allocations) {
     for (auto const& alloc : it.second) {
-      bool result = this->HardwareAllocator.AllocateResource(
+      bool result = this->ResourceAllocator.AllocateResource(
         it.first, alloc.Id, alloc.SlotsNeeded);
       (void)result;
       assert(result);
-      allocatedHardware[alloc.ProcessIndex][it.first].push_back(
+      allocatedResources[alloc.ProcessIndex][it.first].push_back(
         { alloc.Id, static_cast<unsigned int>(alloc.SlotsNeeded) });
     }
   }
@@ -245,14 +277,15 @@ bool cmCTestMultiProcessHandler::AllocateHardware(int index)
   return true;
 }
 
-bool cmCTestMultiProcessHandler::TryAllocateHardware(
+bool cmCTestMultiProcessHandler::TryAllocateResources(
   int index,
-  std::map<std::string, std::vector<cmCTestBinPackerAllocation>>& allocations)
+  std::map<std::string, std::vector<cmCTestBinPackerAllocation>>& allocations,
+  std::map<std::string, ResourceAllocationError>* errors)
 {
   allocations.clear();
 
   std::size_t processIndex = 0;
-  for (auto const& process : this->Properties[index]->Processes) {
+  for (auto const& process : this->Properties[index]->ResourceGroups) {
     for (auto const& requirement : process) {
       for (int i = 0; i < requirement.UnitsNeeded; ++i) {
         allocations[requirement.ResourceType].push_back(
@@ -262,33 +295,43 @@ bool cmCTestMultiProcessHandler::TryAllocateHardware(
     ++processIndex;
   }
 
-  auto const& availableHardware = this->HardwareAllocator.GetResources();
+  bool result = true;
+  auto const& availableResources = this->ResourceAllocator.GetResources();
   for (auto& it : allocations) {
-    if (!availableHardware.count(it.first)) {
-      return false;
-    }
-    if (!cmAllocateCTestHardwareRoundRobin(availableHardware.at(it.first),
-                                           it.second)) {
-      return false;
+    if (!availableResources.count(it.first)) {
+      if (errors) {
+        (*errors)[it.first] = ResourceAllocationError::NoResourceType;
+        result = false;
+      } else {
+        return false;
+      }
+    } else if (!cmAllocateCTestResourcesRoundRobin(
+                 availableResources.at(it.first), it.second)) {
+      if (errors) {
+        (*errors)[it.first] = ResourceAllocationError::InsufficientResources;
+        result = false;
+      } else {
+        return false;
+      }
     }
   }
 
-  return true;
+  return result;
 }
 
-void cmCTestMultiProcessHandler::DeallocateHardware(int index)
+void cmCTestMultiProcessHandler::DeallocateResources(int index)
 {
-  if (!this->TestHandler->UseHardwareSpec) {
+  if (!this->TestHandler->UseResourceSpec) {
     return;
   }
 
   {
-    auto& allocatedHardware = this->AllocatedHardware[index];
-    for (auto const& processAlloc : allocatedHardware) {
+    auto& allocatedResources = this->AllocatedResources[index];
+    for (auto const& processAlloc : allocatedResources) {
       for (auto const& it : processAlloc) {
         auto resourceType = it.first;
         for (auto const& it2 : it.second) {
-          bool success = this->HardwareAllocator.DeallocateResource(
+          bool success = this->ResourceAllocator.DeallocateResource(
             resourceType, it2.Id, it2.Slots);
           (void)success;
           assert(success);
@@ -296,12 +339,12 @@ void cmCTestMultiProcessHandler::DeallocateHardware(int index)
       }
     }
   }
-  this->AllocatedHardware.erase(index);
+  this->AllocatedResources.erase(index);
 }
 
-bool cmCTestMultiProcessHandler::AllHardwareAvailable()
+bool cmCTestMultiProcessHandler::AllResourcesAvailable()
 {
-  for (auto const& it : this->HardwareAllocator.GetResources()) {
+  for (auto const& it : this->ResourceAllocator.GetResources()) {
     for (auto const& it2 : it.second) {
       if (it2.second.Locked != 0) {
         return false;
@@ -312,14 +355,21 @@ bool cmCTestMultiProcessHandler::AllHardwareAvailable()
   return true;
 }
 
-void cmCTestMultiProcessHandler::CheckHardwareAvailable()
+void cmCTestMultiProcessHandler::CheckResourcesAvailable()
 {
-  for (auto test : this->SortedTests) {
-    std::map<std::string, std::vector<cmCTestBinPackerAllocation>> allocations;
-    this->TestsHaveSufficientHardware[test] =
-      !this->TestHandler->UseHardwareSpec ||
-      this->TryAllocateHardware(test, allocations);
+  if (this->TestHandler->UseResourceSpec) {
+    for (auto test : this->SortedTests) {
+      std::map<std::string, std::vector<cmCTestBinPackerAllocation>>
+        allocations;
+      this->TryAllocateResources(test, allocations,
+                                 &this->ResourceAllocationErrors[test]);
+    }
   }
+}
+
+bool cmCTestMultiProcessHandler::CheckStopOnFailure()
+{
+  return this->CTest->GetStopOnFailure();
 }
 
 bool cmCTestMultiProcessHandler::CheckStopTimePassed()
@@ -346,7 +396,7 @@ void cmCTestMultiProcessHandler::SetStopTimePassed()
   }
 }
 
-void cmCTestMultiProcessHandler::AllocateResources(int index)
+void cmCTestMultiProcessHandler::LockResources(int index)
 {
   this->LockedResources.insert(
     this->Properties[index]->LockedResources.begin(),
@@ -357,7 +407,7 @@ void cmCTestMultiProcessHandler::AllocateResources(int index)
   }
 }
 
-void cmCTestMultiProcessHandler::DeallocateResources(int index)
+void cmCTestMultiProcessHandler::UnlockResources(int index)
 {
   for (std::string const& i : this->Properties[index]->LockedResources) {
     this->LockedResources.erase(i);
@@ -399,15 +449,15 @@ bool cmCTestMultiProcessHandler::StartTest(int test)
 {
   // Check for locked resources
   for (std::string const& i : this->Properties[test]->LockedResources) {
-    if (cmContains(this->LockedResources, i)) {
+    if (cm::contains(this->LockedResources, i)) {
       return false;
     }
   }
 
-  // Allocate hardware
-  if (this->TestsHaveSufficientHardware[test] &&
-      !this->AllocateHardware(test)) {
-    this->DeallocateHardware(test);
+  // Allocate resources
+  if (this->ResourceAllocationErrors[test].empty() &&
+      !this->AllocateResources(test)) {
+    this->DeallocateResources(test);
     return false;
   }
 
@@ -417,7 +467,7 @@ bool cmCTestMultiProcessHandler::StartTest(int test)
   }
   // This test was not able to start because it is waiting
   // on depends to run
-  this->DeallocateHardware(test);
+  this->DeallocateResources(test);
   return false;
 }
 
@@ -435,6 +485,10 @@ void cmCTestMultiProcessHandler::StartNextTests()
   }
 
   if (this->CheckStopTimePassed()) {
+    return;
+  }
+
+  if (this->CheckStopOnFailure() && !this->Failed->empty()) {
     return;
   }
 
@@ -492,7 +546,8 @@ void cmCTestMultiProcessHandler::StartNextTests()
     if (this->SerialTestRunning) {
       break;
     }
-    // We can only start a RUN_SERIAL test if no other tests are also running.
+    // We can only start a RUN_SERIAL test if no other tests are also
+    // running.
     if (this->Properties[test]->RunSerial && this->RunningCount > 0) {
       continue;
     }
@@ -570,8 +625,8 @@ void cmCTestMultiProcessHandler::OnTestLoadRetryCB(uv_timer_t* timer)
   self->StartNextTests();
 }
 
-void cmCTestMultiProcessHandler::FinishTestProcess(cmCTestRunTest* runner,
-                                                   bool started)
+void cmCTestMultiProcessHandler::FinishTestProcess(
+  std::unique_ptr<cmCTestRunTest> runner, bool started)
 {
   this->Completed++;
 
@@ -583,7 +638,8 @@ void cmCTestMultiProcessHandler::FinishTestProcess(cmCTestRunTest* runner,
     this->SetStopTimePassed();
   }
   if (started) {
-    if (!this->StopTimePassed && runner->StartAgain(this->Completed)) {
+    if (!this->StopTimePassed &&
+        cmCTestRunTest::StartAgain(std::move(runner), this->Completed)) {
       this->Completed--; // remove the completed test because run again
       return;
     }
@@ -602,8 +658,8 @@ void cmCTestMultiProcessHandler::FinishTestProcess(cmCTestRunTest* runner,
   this->TestFinishMap[test] = true;
   this->TestRunningMap[test] = false;
   this->WriteCheckpoint(test);
-  this->DeallocateHardware(test);
   this->DeallocateResources(test);
+  this->UnlockResources(test);
   this->RunningCount -= GetProcessorsUsed(test);
 
   for (auto p : properties->Affinity) {
@@ -611,7 +667,7 @@ void cmCTestMultiProcessHandler::FinishTestProcess(cmCTestRunTest* runner,
   }
   properties->Affinity.clear();
 
-  delete runner;
+  runner.reset();
   if (started) {
     this->StartNextTests();
   }
@@ -754,7 +810,7 @@ void cmCTestMultiProcessHandler::CreateParallelTestCostList()
   // In parallel test runs add previously failed tests to the front
   // of the cost list and queue other tests for further sorting
   for (auto const& t : this->Tests) {
-    if (cmContains(this->LastTestsFailed, this->Properties[t.first]->Name)) {
+    if (cm::contains(this->LastTestsFailed, this->Properties[t.first]->Name)) {
       // If the test failed last time, it should be run first.
       this->SortedTests.push_back(t.first);
       alreadySortedTests.insert(t.first);
@@ -788,12 +844,12 @@ void cmCTestMultiProcessHandler::CreateParallelTestCostList()
   // Sort tests within each level by COST and append them to the cost list.
   for (TestSet const& currentSet : cmReverseRange(priorityStack)) {
     TestList sortedCopy;
-    cmAppend(sortedCopy, currentSet);
+    cm::append(sortedCopy, currentSet);
     std::stable_sort(sortedCopy.begin(), sortedCopy.end(),
                      TestComparator(this));
 
     for (auto const& j : sortedCopy) {
-      if (!cmContains(alreadySortedTests, j)) {
+      if (!cm::contains(alreadySortedTests, j)) {
         this->SortedTests.push_back(j);
         alreadySortedTests.insert(j);
       }
@@ -825,7 +881,7 @@ void cmCTestMultiProcessHandler::CreateSerialTestCostList()
   TestSet alreadySortedTests;
 
   for (int test : presortedList) {
-    if (cmContains(alreadySortedTests, test)) {
+    if (cm::contains(alreadySortedTests, test)) {
       continue;
     }
 
@@ -833,7 +889,7 @@ void cmCTestMultiProcessHandler::CreateSerialTestCostList()
     GetAllTestDependencies(test, dependencies);
 
     for (int testDependency : dependencies) {
-      if (!cmContains(alreadySortedTests, testDependency)) {
+      if (!cm::contains(alreadySortedTests, testDependency)) {
         alreadySortedTests.insert(testDependency);
         this->SortedTests.push_back(testDependency);
       }
@@ -912,14 +968,14 @@ static Json::Value DumpTimeoutAfterMatch(
   return timeoutAfterMatch;
 }
 
-static Json::Value DumpProcessesToJsonArray(
+static Json::Value DumpResourceGroupsToJsonArray(
   const std::vector<
     std::vector<cmCTestTestHandler::cmCTestTestResourceRequirement>>&
-    processes)
+    resourceGroups)
 {
-  Json::Value jsonProcesses = Json::arrayValue;
-  for (auto const& it : processes) {
-    Json::Value jsonProcess = Json::objectValue;
+  Json::Value jsonResourceGroups = Json::arrayValue;
+  for (auto const& it : resourceGroups) {
+    Json::Value jsonResourceGroup = Json::objectValue;
     Json::Value requirements = Json::arrayValue;
     for (auto const& it2 : it) {
       Json::Value res = Json::objectValue;
@@ -928,10 +984,10 @@ static Json::Value DumpProcessesToJsonArray(
       res["slots"] = it2.SlotsNeeded;
       requirements.append(res);
     }
-    jsonProcess["requirements"] = requirements;
-    jsonProcesses.append(jsonProcess);
+    jsonResourceGroup["requirements"] = requirements;
+    jsonResourceGroups.append(jsonResourceGroup);
   }
-  return jsonProcesses;
+  return jsonResourceGroups;
 }
 
 static Json::Value DumpCTestProperty(std::string const& name,
@@ -1005,9 +1061,10 @@ static Json::Value DumpCTestProperties(
       "PASS_REGULAR_EXPRESSION",
       DumpRegExToJsonArray(testProperties.RequiredRegularExpressions)));
   }
-  if (!testProperties.Processes.empty()) {
+  if (!testProperties.ResourceGroups.empty()) {
     properties.append(DumpCTestProperty(
-      "PROCESSES", DumpProcessesToJsonArray(testProperties.Processes)));
+      "RESOURCE_GROUPS",
+      DumpResourceGroupsToJsonArray(testProperties.ResourceGroups)));
   }
   if (testProperties.WantAffinity) {
     properties.append(
@@ -1153,7 +1210,7 @@ static Json::Value DumpCTestInfo(
     const std::vector<std::string>& args = testRun.GetArguments();
     if (!args.empty()) {
       commandAndArgs.reserve(args.size() + 1);
-      cmAppend(commandAndArgs, args);
+      cm::append(commandAndArgs, args);
     }
     testInfo["command"] = DumpToJsonArray(commandAndArgs);
   }

@@ -23,6 +23,7 @@
 #include "cmState.h"
 #include "cmStateSnapshot.h"
 #include "cmStringAlgorithms.h"
+#include "cmSystemTools.h"
 #include "cmVersion.h"
 #include "cmWorkingDirectory.h"
 #include "cmXMLSafe.h"
@@ -124,7 +125,7 @@ int cmCPackGenerator::PrepareNames()
   cmCPackLogger(cmCPackLog::LOG_DEBUG,
                 "Look for: CPACK_PACKAGE_DESCRIPTION_FILE" << std::endl);
   const char* descFileName = this->GetOption("CPACK_PACKAGE_DESCRIPTION_FILE");
-  if (descFileName) {
+  if (descFileName && !this->GetOption("CPACK_PACKAGE_DESCRIPTION")) {
     cmCPackLogger(cmCPackLog::LOG_DEBUG,
                   "Look for: " << descFileName << std::endl);
     if (!cmSystemTools::FileExists(descFileName)) {
@@ -148,7 +149,12 @@ int cmCPackGenerator::PrepareNames()
     while (ifs && cmSystemTools::GetLineFromStream(ifs, line)) {
       ostr << cmXMLSafe(line) << std::endl;
     }
-    this->SetOptionIfNotSet("CPACK_PACKAGE_DESCRIPTION", ostr.str().c_str());
+    this->SetOption("CPACK_PACKAGE_DESCRIPTION", ostr.str().c_str());
+    const char* defFileName =
+      this->GetOption("CPACK_DEFAULT_PACKAGE_DESCRIPTION_FILE");
+    if (defFileName && !strcmp(defFileName, descFileName)) {
+      this->SetOption("CPACK_USED_DEFAULT_PACKAGE_DESCRIPTION_FILE", "ON");
+    }
   }
   if (!this->GetOption("CPACK_PACKAGE_DESCRIPTION")) {
     cmCPackLogger(
@@ -348,6 +354,7 @@ int cmCPackGenerator::InstallProjectViaInstalledDirectories(
                     "- Install directory: " << top << std::endl);
       gl.RecurseOn();
       gl.SetRecurseListDirs(true);
+      gl.SetRecurseThroughSymlinks(false);
       if (!gl.FindFiles(findExpr)) {
         cmCPackLogger(cmCPackLog::LOG_ERROR,
                       "Cannot find any files in the installed directory"
@@ -396,7 +403,6 @@ int cmCPackGenerator::InstallProjectViaInstalledDirectories(
       }
       /* rebuild symlinks in the installed tree */
       if (!symlinkedFiles.empty()) {
-        std::string curDir = cmSystemTools::GetCurrentWorkingDirectory();
         std::string goToDir = cmStrCat(tempDir, '/', subdir);
         cmCPackLogger(cmCPackLog::LOG_DEBUG,
                       "Change dir to: " << goToDir << std::endl);
@@ -435,7 +441,8 @@ int cmCPackGenerator::InstallProjectViaInstalledDirectories(
           }
         }
         cmCPackLogger(cmCPackLog::LOG_DEBUG,
-                      "Going back to: " << curDir << std::endl);
+                      "Going back to: " << workdir.GetOldDirectory()
+                                        << std::endl);
       }
     }
   }
@@ -605,14 +612,6 @@ int cmCPackGenerator::InstallProjectViaInstallCMakeProjects(
         cmExpandList(buildConfig, buildConfigs);
       }
 
-      // Try get configurations requested by the user explicitly
-      {
-        const char* const configsCstr =
-          this->GetOption("CPACK_INSTALL_CMAKE_CONFIGURATIONS");
-        auto configs = configsCstr ? configsCstr : std::string{};
-        cmExpandList(configs, buildConfigs);
-      }
-
       // Remove duplicates
       std::sort(buildConfigs.begin(), buildConfigs.end());
       buildConfigs.erase(std::unique(buildConfigs.begin(), buildConfigs.end()),
@@ -623,9 +622,9 @@ int cmCPackGenerator::InstallProjectViaInstallCMakeProjects(
         buildConfigs.emplace_back();
       }
 
-      std::unique_ptr<cmGlobalGenerator> globalGenerator(
+      std::unique_ptr<cmGlobalGenerator> globalGenerator =
         this->MakefileMap->GetCMakeInstance()->CreateGlobalGenerator(
-          cmakeGenerator));
+          cmakeGenerator);
       if (!globalGenerator) {
         cmCPackLogger(cmCPackLog::LOG_ERROR,
                       "Specified package generator not found. "
@@ -864,6 +863,7 @@ int cmCPackGenerator::InstallCMakeProject(
     findExpr += "/*";
     glB.RecurseOn();
     glB.SetRecurseListDirs(true);
+    glB.SetRecurseThroughSymlinks(false);
     glB.FindFiles(findExpr);
     filesBefore = glB.GetFiles();
     std::sort(filesBefore.begin(), filesBefore.end());
@@ -1262,7 +1262,17 @@ std::string cmCPackGenerator::FindTemplate(const char* name)
   cmCPackLogger(cmCPackLog::LOG_DEBUG,
                 "Look for template: " << (name ? name : "(NULL)")
                                       << std::endl);
+  // Search CMAKE_MODULE_PATH for a custom template.
   std::string ffile = this->MakefileMap->GetModulesFile(name);
+  if (ffile.empty()) {
+    // Fall back to our internal builtin default.
+    ffile = cmStrCat(cmSystemTools::GetCMakeRoot(), "/Modules/Internal/CPack/",
+                     name);
+    cmSystemTools::ConvertToUnixSlashes(ffile);
+    if (!cmSystemTools::FileExists(ffile)) {
+      ffile.clear();
+    }
+  }
   cmCPackLogger(cmCPackLog::LOG_DEBUG,
                 "Found template: " << ffile << std::endl);
   return ffile;

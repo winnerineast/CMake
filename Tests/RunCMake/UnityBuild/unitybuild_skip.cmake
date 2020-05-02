@@ -12,7 +12,7 @@ add_library(tgt SHARED ${srcs})
 set_target_properties(tgt PROPERTIES UNITY_BUILD ON)
 
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/s1.c
-  PROPERTIES GENERATED ON)
+  PROPERTIES HEADER_FILE_ONLY ON)
 
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/s2.c
   PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)

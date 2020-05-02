@@ -18,12 +18,12 @@
 
 #include "cmsys/RegularExpression.hxx"
 
+#include "cmCTest.h"
 #include "cmCTestGenericHandler.h"
-#include "cmCTestHardwareSpec.h"
+#include "cmCTestResourceSpec.h"
 #include "cmDuration.h"
 #include "cmListFileCache.h"
 
-class cmCTest;
 class cmMakefile;
 class cmXMLWriter;
 
@@ -158,7 +158,7 @@ public:
     std::set<std::string> FixturesCleanup;
     std::set<std::string> FixturesRequired;
     std::set<std::string> RequireSuccessDepends;
-    std::vector<std::vector<cmCTestTestResourceRequirement>> Processes;
+    std::vector<std::vector<cmCTestTestResourceRequirement>> ResourceGroups;
     // Private test generator properties used to track backtraces
     cmListFileBacktrace Backtrace;
   };
@@ -202,9 +202,9 @@ public:
                                     std::vector<std::string>& extraPaths,
                                     std::vector<std::string>& failed);
 
-  static bool ParseProcessesProperty(
+  static bool ParseResourceGroupsProperty(
     const std::string& val,
-    std::vector<std::vector<cmCTestTestResourceRequirement>>& processes);
+    std::vector<std::vector<cmCTestTestResourceRequirement>>& resourceGroups);
 
   using ListOfTests = std::vector<cmCTestTestProperties>;
 
@@ -235,7 +235,7 @@ protected:
   void AttachFiles(cmXMLWriter& xml, cmCTestTestResult& result);
 
   //! Clean test output to specified length
-  bool CleanTestOutput(std::string& output, size_t length);
+  void CleanTestOutput(std::string& output, size_t length);
 
   cmDuration ElapsedTestingTime;
 
@@ -278,7 +278,7 @@ private:
   /**
    * Run the tests for a directory and any subdirectories
    */
-  void ProcessDirectory(std::vector<std::string>& passed,
+  bool ProcessDirectory(std::vector<std::string>& passed,
                         std::vector<std::string>& failed);
 
   /**
@@ -336,8 +336,9 @@ private:
   cmsys::RegularExpression IncludeTestsRegularExpression;
   cmsys::RegularExpression ExcludeTestsRegularExpression;
 
-  bool UseHardwareSpec;
-  cmCTestHardwareSpec HardwareSpec;
+  bool UseResourceSpec;
+  cmCTestResourceSpec ResourceSpec;
+  std::string ResourceSpecFile;
 
   void GenerateRegressionImages(cmXMLWriter& xml, const std::string& dart);
   cmsys::RegularExpression DartStuff1;
@@ -353,6 +354,8 @@ private:
 
   std::ostream* LogFile;
 
+  cmCTest::Repeat RepeatMode = cmCTest::Repeat::Never;
+  int RepeatCount = 1;
   bool RerunFailed;
 };
 

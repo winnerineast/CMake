@@ -192,8 +192,8 @@ Autogen
 CTest
 -----
 
-* :manual:`ctest(1)` now has the ability to serialize tests based on hardware
-  requirements for each test. See :ref:`ctest-hardware-allocation` for
+* :manual:`ctest(1)` now has the ability to schedule tests based on resource
+  requirements for each test. See :ref:`ctest-resource-allocation` for
   details.
 
 * A new test property, :prop_test:`SKIP_REGULAR_EXPRESSION`, has been added.
@@ -207,9 +207,8 @@ CTest
 CPack
 -----
 
-* CPack variable :variable:`CPACK_INSTALL_CMAKE_CONFIGURATIONS` was added to
-  control what configurations are to be packaged for multi-configuration
-  CMake generators.
+* :manual:`cpack(1)` learned support for multiple configurations for ``-C``
+  option.
 
 * The :cpack_gen:`CPack DEB Generator` is now able to format generic text
   (usually used as the description for multiple CPack generators) according
@@ -278,3 +277,29 @@ Other Changes
 * When using :variable:`CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS` on Windows the
   auto-generated exports are now updated only when the object files
   providing the symbols are updated.
+
+Updates
+=======
+
+Changes made since CMake 3.16.0 include the following.
+
+3.16.2
+------
+
+* CMake 3.16.0 and 3.16.1 processed ``.hh`` files with :prop_tgt:`AUTOMOC`.
+  This was a behavior change from CMake 3.15 and below that can break
+  existing projects, so it has been reverted as of 3.16.2.
+
+3.16.5
+------
+
+* The :module:`FindPython`, :module:`FindPython2`, and :module:`FindPython3`
+  modules no longer create cache entries for ``Python{,2,3}_LIBRARY_RELEASE``
+  and ``Python{,2,3}_LIBRARY_DEBUG``.  Those values are always computed from
+  other results and so should not be cached.  The entries were created by
+  CMake 3.16.0 through 3.16.4 but were always ``FORCE``-set and could not
+  be meaningfully edited by users.
+
+  Additionally, the modules no longer expose their internal ``_Python*``
+  cache entries publicly.  CMake 3.16.0 through 3.16.4 accidentally
+  made them visible as advanced cache entries.

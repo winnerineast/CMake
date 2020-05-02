@@ -8,9 +8,10 @@ include_directories(
 set(CMakeLib_TESTS
   testArgumentParser.cxx
   testCTestBinPacker.cxx
-  testCTestProcesses.cxx
-  testCTestHardwareAllocator.cxx
-  testCTestHardwareSpec.cxx
+  testCTestResourceAllocator.cxx
+  testCTestResourceSpec.cxx
+  testCTestResourceGroups.cxx
+  testGccDepfileReader.cxx
   testGeneratedFileStream.cxx
   testRST.cxx
   testRange.cxx
@@ -25,6 +26,8 @@ set(CMakeLib_TESTS
   testUVProcessChain.cxx
   testUVRAII.cxx
   testUVStreambuf.cxx
+  testCMExtMemory.cxx
+  testCMExtAlgorithm.cxx
   )
 
 add_executable(testUVProcessChainHelper testUVProcessChainHelper.cxx)
@@ -32,7 +35,8 @@ add_executable(testUVProcessChainHelper testUVProcessChainHelper.cxx)
 set(testRST_ARGS ${CMAKE_CURRENT_SOURCE_DIR})
 set(testUVProcessChain_ARGS $<TARGET_FILE:testUVProcessChainHelper>)
 set(testUVStreambuf_ARGS $<TARGET_FILE:cmake>)
-set(testCTestHardwareSpec_ARGS ${CMAKE_CURRENT_SOURCE_DIR})
+set(testCTestResourceSpec_ARGS ${CMAKE_CURRENT_SOURCE_DIR})
+set(testGccDepfileReader_ARGS ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
   list(APPEND CMakeLib_TESTS

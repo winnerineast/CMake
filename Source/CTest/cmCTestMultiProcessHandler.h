@@ -6,6 +6,7 @@
 #include "cmConfigure.h" // IWYU pragma: keep
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -14,13 +15,13 @@
 
 #include "cm_uv.h"
 
-#include "cmCTestHardwareAllocator.h"
+#include "cmCTest.h"
+#include "cmCTestResourceAllocator.h"
 #include "cmCTestTestHandler.h"
 #include "cmUVHandlePtr.h"
 
-class cmCTest;
 struct cmCTestBinPackerAllocation;
-class cmCTestHardwareSpec;
+class cmCTestResourceSpec;
 class cmCTestRunTest;
 
 /** \class cmCTestMultiProcessHandler
@@ -47,7 +48,7 @@ public:
     : public std::map<int, cmCTestTestHandler::cmCTestTestProperties*>
   {
   };
-  struct HardwareAllocation
+  struct ResourceAllocation
   {
     std::string Id;
     unsigned int Slots;
@@ -85,14 +86,20 @@ public:
 
   cmCTestTestHandler* GetTestHandler() { return this->TestHandler; }
 
-  void SetQuiet(bool b) { this->Quiet = b; }
-
-  void InitHardwareAllocator(const cmCTestHardwareSpec& spec)
+  void SetRepeatMode(cmCTest::Repeat mode, int count)
   {
-    this->HardwareAllocator.InitializeFromHardwareSpec(spec);
+    this->RepeatMode = mode;
+    this->RepeatCount = count;
   }
 
-  void CheckHardwareAvailable();
+  void SetQuiet(bool b) { this->Quiet = b; }
+
+  void InitResourceAllocator(const cmCTestResourceSpec& spec)
+  {
+    this->ResourceAllocator.InitializeFromResourceSpec(spec);
+  }
+
+  void CheckResourcesAvailable();
 
 protected:
   // Start the next test or tests as many as are allowed by
@@ -118,7 +125,7 @@ protected:
   // Removes the checkpoint file
   void MarkFinished();
   void EraseTest(int index);
-  void FinishTestProcess(cmCTestRunTest* runner, bool started);
+  void FinishTestProcess(std::unique_ptr<cmCTestRunTest> runner, bool started);
 
   static void OnTestLoadRetryCB(uv_timer_t* timer);
 
@@ -131,19 +138,28 @@ protected:
   inline size_t GetProcessorsUsed(int index);
   std::string GetName(int index);
 
+  bool CheckStopOnFailure();
+
   bool CheckStopTimePassed();
   void SetStopTimePassed();
 
-  void AllocateResources(int index);
-  void DeallocateResources(int index);
+  void LockResources(int index);
+  void UnlockResources(int index);
 
-  bool AllocateHardware(int index);
-  bool TryAllocateHardware(
+  enum class ResourceAllocationError
+  {
+    NoResourceType,
+    InsufficientResources,
+  };
+
+  bool AllocateResources(int index);
+  bool TryAllocateResources(
     int index,
     std::map<std::string, std::vector<cmCTestBinPackerAllocation>>&
-      allocations);
-  void DeallocateHardware(int index);
-  bool AllHardwareAvailable();
+      allocations,
+    std::map<std::string, ResourceAllocationError>* errors = nullptr);
+  void DeallocateResources(int index);
+  bool AllResourcesAvailable();
 
   // map from test number to set of depend tests
   TestMap Tests;
@@ -166,10 +182,11 @@ protected:
   std::vector<std::string> LastTestsFailed;
   std::set<std::string> LockedResources;
   std::map<int,
-           std::vector<std::map<std::string, std::vector<HardwareAllocation>>>>
-    AllocatedHardware;
-  std::map<int, bool> TestsHaveSufficientHardware;
-  cmCTestHardwareAllocator HardwareAllocator;
+           std::vector<std::map<std::string, std::vector<ResourceAllocation>>>>
+    AllocatedResources;
+  std::map<int, std::map<std::string, ResourceAllocationError>>
+    ResourceAllocationErrors;
+  cmCTestResourceAllocator ResourceAllocator;
   std::vector<cmCTestTestHandler::cmCTestTestResult>* TestResults;
   size_t ParallelLevel; // max number of process that can be run at once
   unsigned long TestLoad;
@@ -179,6 +196,8 @@ protected:
   cmCTestTestHandler* TestHandler;
   cmCTest* CTest;
   bool HasCycles;
+  cmCTest::Repeat RepeatMode = cmCTest::Repeat::Never;
+  int RepeatCount = 1;
   bool Quiet;
   bool SerialTestRunning;
 };

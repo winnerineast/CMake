@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include <cm/optional>
+
 #include "cmCursesCacheEntryComposite.h"
 #include "cmCursesForm.h"
 #include "cmCursesStandardIncludes.h"
@@ -67,8 +69,8 @@ public:
    * exception is during a resize. The optional argument specifies the
    * string to be displayed in the status bar.
    */
-  void UpdateStatusBar() override { this->UpdateStatusBar(nullptr); }
-  virtual void UpdateStatusBar(const char* message);
+  void UpdateStatusBar() override { this->UpdateStatusBar(cm::nullopt); }
+  void UpdateStatusBar(cm::optional<std::string> message);
 
   /**
    * Display current commands and their keys on the toolbar.  This
@@ -127,7 +129,7 @@ protected:
   void ResetOutputs();
 
   // Display the current progress and output
-  void DisplayOutputs();
+  void DisplayOutputs(std::string const& newOutput);
 
   // Copies of cache entries stored in the user interface
   std::vector<cmCursesCacheEntryComposite> Entries;

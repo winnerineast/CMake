@@ -11,10 +11,11 @@ pushd "${BASH_SOURCE%/*}/../../Source/LexerParser" > /dev/null
 
 for lexer in            \
     CommandArgument     \
-    CTestProcesses      \
+    CTestResourceGroups \
     DependsJava         \
     Expr                \
-    Fortran
+    Fortran             \
+    GccDepfile
 do
     cxx_file=cm${lexer}Lexer.cxx
     h_file=cm${lexer}Lexer.h

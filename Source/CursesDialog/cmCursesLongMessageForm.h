@@ -14,20 +14,24 @@
 class cmCursesLongMessageForm : public cmCursesForm
 {
 public:
+  enum class ScrollBehavior
+  {
+    NoScroll,
+    ScrollDown
+  };
+
   cmCursesLongMessageForm(std::vector<std::string> const& messages,
-                          const char* title);
+                          const char* title, ScrollBehavior scrollBehavior);
   ~cmCursesLongMessageForm() override;
 
   cmCursesLongMessageForm(cmCursesLongMessageForm const&) = delete;
   cmCursesLongMessageForm& operator=(cmCursesLongMessageForm const&) = delete;
 
+  void UpdateContent(std::string const& output, std::string const& title);
+
   // Description:
   // Handle user input.
   void HandleInput() override;
-
-  // Description:
-  // Scroll down to the end of the content
-  void ScrollDown();
 
   // Description:
   // Display form. Use a window of size width x height, starting
@@ -45,8 +49,13 @@ public:
   void UpdateStatusBar() override;
 
 protected:
+  static constexpr int MAX_CONTENT_SIZE = 60000;
+
+  void DrawMessage(const char* msg) const;
+
   std::string Messages;
   std::string Title;
+  ScrollBehavior Scrolling;
 
   FIELD* Fields[2];
 };

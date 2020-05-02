@@ -35,7 +35,7 @@ public:
     this->NumberOfRunsTotal = n;
   }
 
-  void SetRerunMode(cmCTest::Rerun r) { this->RerunMode = r; }
+  void SetRepeatMode(cmCTest::Repeat r) { this->RepeatMode = r; }
   void SetTestProperties(cmCTestTestHandler::cmCTestTestProperties* prop)
   {
     this->TestProperties = prop;
@@ -65,6 +65,15 @@ public:
   // Read and store output.  Returns true if it must be called again.
   void CheckOutput(std::string const& line);
 
+  static bool StartTest(std::unique_ptr<cmCTestRunTest> runner,
+                        size_t completed, size_t total);
+  static bool StartAgain(std::unique_ptr<cmCTestRunTest> runner,
+                         size_t completed);
+
+  static void StartFailure(std::unique_ptr<cmCTestRunTest> runner,
+                           std::string const& output,
+                           std::string const& detail);
+
   // launch the test process, return whether it started correctly
   bool StartTest(size_t completed, size_t total);
   // capture and report the test results
@@ -74,9 +83,7 @@ public:
 
   void ComputeWeightedCost();
 
-  bool StartAgain(size_t completed);
-
-  void StartFailure(std::string const& output);
+  void StartFailure(std::string const& output, std::string const& detail);
 
   cmCTest* GetCTest() const { return this->CTest; }
 
@@ -84,22 +91,25 @@ public:
 
   const std::vector<std::string>& GetArguments() { return this->Arguments; }
 
-  void FinalizeTest();
+  void FinalizeTest(bool started = true);
 
   bool TimedOutForStopTime() const { return this->TimeoutIsForStopTime; }
 
-  void SetUseAllocatedHardware(bool use) { this->UseAllocatedHardware = use; }
-  void SetAllocatedHardware(
+  void SetUseAllocatedResources(bool use)
+  {
+    this->UseAllocatedResources = use;
+  }
+  void SetAllocatedResources(
     const std::vector<
       std::map<std::string,
-               std::vector<cmCTestMultiProcessHandler::HardwareAllocation>>>&
-      hardware)
+               std::vector<cmCTestMultiProcessHandler::ResourceAllocation>>>&
+      resources)
   {
-    this->AllocatedHardware = hardware;
+    this->AllocatedResources = resources;
   }
 
 private:
-  bool NeedsToRerun();
+  bool NeedsToRepeat();
   void DartProcessing();
   void ExeNotFound(std::string exe);
   bool ForkProcess(cmDuration testTimeOut, bool explicitTimeout,
@@ -109,7 +119,7 @@ private:
   // Run post processing of the process output for MemCheck
   void MemCheckPostProcess();
 
-  void SetupHardwareEnvironment();
+  void SetupResourcesEnvironment();
 
   // Returns "completed/total Test #Index: "
   std::string GetTestPrefix(size_t completed, size_t total) const;
@@ -129,11 +139,11 @@ private:
   std::string StartTime;
   std::string ActualCommand;
   std::vector<std::string> Arguments;
-  bool UseAllocatedHardware = false;
+  bool UseAllocatedResources = false;
   std::vector<std::map<
-    std::string, std::vector<cmCTestMultiProcessHandler::HardwareAllocation>>>
-    AllocatedHardware;
-  cmCTest::Rerun RerunMode = cmCTest::Rerun::Never;
+    std::string, std::vector<cmCTestMultiProcessHandler::ResourceAllocation>>>
+    AllocatedResources;
+  cmCTest::Repeat RepeatMode = cmCTest::Repeat::Never;
   int NumberOfRunsLeft = 1;  // default to 1 run of the test
   int NumberOfRunsTotal = 1; // default to 1 run of the test
   bool RunAgain = false;     // default to not having to run again

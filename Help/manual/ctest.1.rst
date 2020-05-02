@@ -72,6 +72,9 @@ Options
  This option can also be enabled by setting the
  :envvar:`CTEST_OUTPUT_ON_FAILURE` environment variable
 
+``--stop-on-failure``
+ Stop running the tests when the first failure happens.
+
 ``-F``
  Enable failover.
 
@@ -90,14 +93,14 @@ Options
 
  See `Label and Subproject Summary`_.
 
-``--hardware-spec-file <file>``
- Run CTest with :ref:`hardware allocation <ctest-hardware-allocation>` enabled,
+``--resource-spec-file <file>``
+ Run CTest with :ref:`resource allocation <ctest-resource-allocation>` enabled,
  using the
- :ref:`hardware specification file <ctest-hardware-specification-file>`
+ :ref:`resource specification file <ctest-resource-specification-file>`
  specified in ``<file>``.
 
  When ``ctest`` is run as a `Dashboard Client`_ this sets the
- ``HardwareSpecFile`` option of the `CTest Test Step`_.
+ ``ResourceSpecFile`` option of the `CTest Test Step`_.
 
 ``--test-load <level>``
  While running tests in parallel (e.g. with ``-j``), try not to start
@@ -261,23 +264,27 @@ Options
  fail, subsequent calls to CTest with the ``--rerun-failed`` option will run
  the set of tests that most recently failed (if any).
 
+``--repeat <mode>:<n>``
+  Run tests repeatedly based on the given ``<mode>`` up to ``<n>`` times.
+  The modes are:
+
+  ``until-fail``
+    Require each test to run ``<n>`` times without failing in order to pass.
+    This is useful in finding sporadic failures in test cases.
+
+  ``until-pass``
+    Allow each test to run up to ``<n>`` times in order to pass.
+    Repeats tests if they fail for any reason.
+    This is useful in tolerating sporadic failures in test cases.
+
+  ``after-timeout``
+    Allow each test to run up to ``<n>`` times in order to pass.
+    Repeats tests only if they timeout.
+    This is useful in tolerating sporadic timeouts in test cases
+    on busy machines.
+
 ``--repeat-until-fail <n>``
- Require each test to run ``<n>`` times without failing in order to pass.
-
- This is useful in finding sporadic failures in test cases.
-
-``--repeat-until-pass <n>``
- Allow each test to run up to ``<n>`` times in order to pass.
- Repeats tests if they fail for any reason.
-
- This is useful in tolerating sporadic failures in test cases.
-
-``--repeat-after-timeout <n>``
- Allow each test to run up to ``<n>`` times in order to pass.
- Repeats tests only if they timeout.
-
- This is useful in tolerating sporadic timeouts in test cases
- on busy machines.
+ Equivalent to ``--repeat until-fail:<n>``.
 
 ``--max-width <width>``
  Set the max width for a test name to output.
@@ -365,6 +372,14 @@ See `Build and Test Mode`_.
 
  This option will not run any tests, it will simply print the list of
  all labels associated with the test set.
+
+``--no-tests=<[error|ignore]>``
+ Regard no tests found either as error or ignore it.
+
+ If no tests were found, the default behavior of CTest is to always log an
+ error message but to return an error code in script mode only.  This option
+ unifies the behavior of CTest by either returning an error code if no tests
+ were found or by ignoring it.
 
 .. include:: OPTIONS_HELP.txt
 
@@ -980,10 +995,14 @@ Arguments to the command may specify some of the step settings.
 
 Configuration settings include:
 
-``HardwareSpecFile``
+``ResourceSpecFile``
   Specify a
-  :ref:`hardware specification file <ctest-hardware-specification-file>`. See
-  :ref:`ctest-hardware-allocation` for more information.
+  :ref:`resource specification file <ctest-resource-specification-file>`.
+
+  * `CTest Script`_ variable: :variable:`CTEST_RESOURCE_SPEC_FILE`
+  * :module:`CTest` module variable: ``CTEST_RESOURCE_SPEC_FILE``
+
+  See :ref:`ctest-resource-allocation` for more information.
 
 ``LabelsForSubprojects``
   Specify a semicolon-separated list of labels that will be treated as
@@ -1108,6 +1127,20 @@ Additional configuration settings include:
 
   * `CTest Script`_ variable: none
   * :module:`CTest` module variable: ``VALGRIND_COMMAND_OPTIONS``
+
+``DrMemoryCommand``
+  Specify a ``MemoryCheckCommand`` that is known to be a command-line
+  compatible with DrMemory.
+
+  * `CTest Script`_ variable: none
+  * :module:`CTest` module variable: ``DRMEMORY_COMMAND``
+
+``DrMemoryCommandOptions``
+  Specify command-line options to the ``DrMemoryCommand`` tool.
+  They will be placed prior to the test command line.
+
+  * `CTest Script`_ variable: none
+  * :module:`CTest` module variable: ``DRMEMORY_COMMAND_OPTIONS``
 
 .. _`CTest Submit Step`:
 
@@ -1294,22 +1327,31 @@ model is defined as follows:
     Test properties.
     Can contain keys for each of the supported test properties.
 
-.. _`ctest-hardware-allocation`:
+.. _`ctest-resource-allocation`:
 
-Hardware Allocation
+Resource Allocation
 ===================
 
-CTest provides a mechanism for tests to specify the hardware that they need and
-how much of it they need, and for users to specify the hardware availiable on
+CTest provides a mechanism for tests to specify the resources that they need
+in a fine-grained way, and for users to specify the resources availiable on
 the running machine. This allows CTest to internally keep track of which
-hardware is in use and which is free, scheduling tests in a way that prevents
-them from trying to claim hardware that is not available.
+resources are in use and which are free, scheduling tests in a way that
+prevents them from trying to claim resources that are not available.
+
+When the resource allocation feature is used, CTest will not oversubscribe
+resources. For example, if a resource has 8 slots, CTest will not run tests
+that collectively use more than 8 slots at a time. This has the effect of
+limiting how many tests can run at any given time, even if a high ``-j``
+argument is used, if those tests all use some slots from the same resource.
+In addition, it means that a single test that uses more of a resource than is
+available on a machine will not run at all (and will be reported as
+``Not Run``).
 
 A common use case for this feature is for tests that require the use of a GPU.
 Multiple tests can simultaneously allocate memory from a GPU, but if too many
 tests try to do this at once, some of them will fail to allocate, resulting in
 a failed test, even though the test would have succeeded if it had the memory
-it needed. By using the hardware allocation feature, each test can specify how
+it needed. By using the resource allocation feature, each test can specify how
 much memory it requires from a GPU, allowing CTest to schedule tests in a way
 that running several of these tests at once does not exhaust the GPU's memory
 pool.
@@ -1325,40 +1367,60 @@ When a test is executed, and slots from a resource are allocated to that test,
 tests may assume that they have exclusive use of those slots for the duration
 of the test's process.
 
-The CTest hardware allocation feature consists of two inputs:
+The CTest resource allocation feature consists of two inputs:
 
-* The :ref:`hardware specification file <ctest-hardware-specification-file>`,
-  described below, which describes the hardware resources available on the
-  system, and
-* The :prop_test:`PROCESSES` property of tests, which describes the resources
-  required by the test
+* The :ref:`resource specification file <ctest-resource-specification-file>`,
+  described below, which describes the resources available on the system.
+* The :prop_test:`RESOURCE_GROUPS` property of tests, which describes the
+  resources required by the test.
 
-When CTest runs a test, the hardware allocated to that test is passed in the
+When CTest runs a test, the resources allocated to that test are passed in the
 form of a set of
-:ref:`environment variables <ctest-hardware-environment-variables>` as
+:ref:`environment variables <ctest-resource-environment-variables>` as
 described below. Using this information to decide which resource to connect to
 is left to the test writer.
 
-Please note that these processes are not spawned by CTest. The ``PROCESSES``
-property merely tells CTest what processes the test expects to launch. It is up
-to the test itself to do this process spawning, and read the :ref:`environment
-variables <ctest-hardware-environment-variables>` to determine which resources
-each process has been allocated.
+The ``RESOURCE_GROUPS`` property tells CTest what resources a test expects
+to use grouped in a way meaningful to the test.  The test itself must read
+the :ref:`environment variables <ctest-resource-environment-variables>` to
+determine which resources have been allocated to each group.  For example,
+each group may correspond to a process the test will spawn when executed.
 
-.. _`ctest-hardware-specification-file`:
+Note that even if a test specifies a ``RESOURCE_GROUPS`` property, it is still
+possible for that to test to run without any resource allocation (and without
+the corresponding
+:ref:`environment variables <ctest-resource-environment-variables>`)
+if the user does not pass a resource specification file. Passing this file,
+either through the ``--resource-spec-file`` command-line argument or the
+``RESOURCE_SPEC_FILE`` argument to :command:`ctest_test`, is what activates the
+resource allocation feature. Tests should check the
+``CTEST_RESOURCE_GROUP_COUNT`` environment variable to find out whether or not
+resource allocation is activated. This variable will always (and only) be
+defined if resource allocation is activated. If resource allocation is not
+activated, then the ``CTEST_RESOURCE_GROUP_COUNT`` variable will not exist,
+even if it exists for the parent ``ctest`` process. If a test absolutely must
+have resource allocation, then it can return a failing exit code or use the
+:prop_test:`SKIP_RETURN_CODE` or :prop_test:`SKIP_REGULAR_EXPRESSION`
+properties to indicate a skipped test.
 
-Hardware Specification File
+.. _`ctest-resource-specification-file`:
+
+Resource Specification File
 ---------------------------
 
-The hardware specification file is a JSON file which is passed to CTest, either
-on the :manual:`ctest(1)` command line as ``--hardware-spec-file``, or as the
-``HARDWARE_SPEC_FILE`` argument of :command:`ctest_test`. The hardware
+The resource specification file is a JSON file which is passed to CTest, either
+on the :manual:`ctest(1)` command line as ``--resource-spec-file``, or as the
+``RESOURCE_SPEC_FILE`` argument of :command:`ctest_test`. The resource
 specification file must be a JSON object. All examples in this document assume
-the following hardware specification file:
+the following resource specification file:
 
 .. code-block:: json
 
   {
+    "version": {
+      "major": 1,
+      "minor": 0
+    },
     "local": [
       {
         "gpus": [
@@ -1390,12 +1452,17 @@ the following hardware specification file:
 
 The members are:
 
-``local``
-  A JSON array consisting of CPU sockets present on the system. Currently, only
-  one socket is supported.
+``version``
+  An object containing a ``major`` integer field and a ``minor`` integer field.
+  Currently, the only supported version is major ``1``, minor ``0``. Any other
+  value is an error.
 
-  Each socket is a JSON object with members whose names are equal to the
-  desired resource types, such as ``gpu``. These names must start with a
+``local``
+  A JSON array of resource sets present on the system.  Currently, this array
+  is restricted to being of size 1.
+
+  Each array element is a JSON object with members whose names are equal to the
+  desired resource types, such as ``gpus``. These names must start with a
   lowercase letter or an underscore, and subsequent characters can be a
   lowercase letter, a digit, or an underscore. Uppercase letters are not
   allowed, because certain platforms have case-insensitive environment
@@ -1436,12 +1503,12 @@ In the example file above, there are four GPUs with ID's 0 through 3. GPU 0 has
 2 slots, GPU 1 has 4, GPU 2 has 2, and GPU 3 has a default of 1 slot. There is
 also one cryptography chip with 4 slots.
 
-``PROCESSES`` Property
-----------------------
+``RESOURCE_GROUPS`` Property
+----------------------------
 
-See :prop_test:`PROCESSES` for a description of this property.
+See :prop_test:`RESOURCE_GROUPS` for a description of this property.
 
-.. _`ctest-hardware-environment-variables`:
+.. _`ctest-resource-environment-variables`:
 
 Environment Variables
 ---------------------
@@ -1449,65 +1516,67 @@ Environment Variables
 Once CTest has decided which resources to allocate to a test, it passes this
 information to the test executable as a series of environment variables. For
 each example below, we will assume that the test in question has a
-:prop_test:`PROCESSES` property of ``2,gpus:2;gpus:4,gpus:1,crypto_chips:2``.
+:prop_test:`RESOURCE_GROUPS` property of
+``2,gpus:2;gpus:4,gpus:1,crypto_chips:2``.
 
 The following variables are passed to the test process:
 
-.. envvar:: CTEST_PROCESS_COUNT
+.. envvar:: CTEST_RESOURCE_GROUP_COUNT
 
-  The total number of processes specified by the :prop_test:`PROCESSES`
+  The total number of groups specified by the :prop_test:`RESOURCE_GROUPS`
   property. For example:
 
-  * ``CTEST_PROCESS_COUNT=3``
+  * ``CTEST_RESOURCE_GROUP_COUNT=3``
 
   This variable will only be defined if :manual:`ctest(1)` has been given a
-  ``--hardware-spec-file``, or if :command:`ctest_test` has been given a
-  ``HARDWARE_SPEC_FILE``. If no hardware specification file has been given,
+  ``--resource-spec-file``, or if :command:`ctest_test` has been given a
+  ``RESOURCE_SPEC_FILE``. If no resource specification file has been given,
   this variable will not be defined.
 
-.. envvar:: CTEST_PROCESS_<num>
+.. envvar:: CTEST_RESOURCE_GROUP_<num>
 
-  The list of resource types allocated to each process, with each item
+  The list of resource types allocated to each group, with each item
   separated by a comma. ``<num>`` is a number from zero to
-  ``CTEST_PROCESS_COUNT`` minus one. ``CTEST_PROCESS_<num>`` is defined for
-  each ``<num>`` in this range. For example:
+  ``CTEST_RESOURCE_GROUP_COUNT`` minus one. ``CTEST_RESOURCE_GROUP_<num>``
+  is defined for each ``<num>`` in this range. For example:
 
-  * ``CTEST_PROCESS_0=gpus``
-  * ``CTEST_PROCESS_1=gpus``
-  * ``CTEST_PROCESS_2=crypto_chips,gpus``
+  * ``CTEST_RESOURCE_GROUP_0=gpus``
+  * ``CTEST_RESOURCE_GROUP_1=gpus``
+  * ``CTEST_RESOURCE_GROUP_2=crypto_chips,gpus``
 
-.. envvar:: CTEST_PROCESS_<num>_<resource-type>
+.. envvar:: CTEST_RESOURCE_GROUP_<num>_<resource-type>
 
   The list of resource IDs and number of slots from each ID allocated to each
-  process for a given resource type. This variable consists of a series of
+  group for a given resource type. This variable consists of a series of
   pairs, each pair separated by a semicolon, and with the two items in the pair
   separated by a comma. The first item in each pair is ``id:`` followed by the
   ID of a resource of type ``<resource-type>``, and the second item is
   ``slots:`` followed by the number of slots from that resource allocated to
-  the given process. For example:
+  the given group. For example:
 
-  * ``CTEST_PROCESS_0_GPUS=id:0,slots:2``
-  * ``CTEST_PROCESS_1_GPUS=id:2,slots:2``
-  * ``CTEST_PROCESS_2_GPUS=id:1,slots:4;id:3,slots:1``
-  * ``CTEST_PROCESS_2_CRYPTO_CHIPS=id:card0,slots:2``
+  * ``CTEST_RESOURCE_GROUP_0_GPUS=id:0,slots:2``
+  * ``CTEST_RESOURCE_GROUP_1_GPUS=id:2,slots:2``
+  * ``CTEST_RESOURCE_GROUP_2_GPUS=id:1,slots:4;id:3,slots:1``
+  * ``CTEST_RESOURCE_GROUP_2_CRYPTO_CHIPS=id:card0,slots:2``
 
-  In this example, process 0 gets 2 slots from GPU ``0``, process 1 gets 2 slots
-  from GPU ``2``, and process 2 gets 4 slots from GPU ``1`` and 2 slots from
-  cryptography chip ``card0``.
+  In this example, group 0 gets 2 slots from GPU ``0``, group 1 gets 2 slots
+  from GPU ``2``, and group 2 gets 4 slots from GPU ``1``, 1 slot from GPU
+  ``3``, and 2 slots from cryptography chip ``card0``.
 
-  ``<num>`` is a number from zero to ``CTEST_PROCESS_COUNT`` minus one.
+  ``<num>`` is a number from zero to ``CTEST_RESOURCE_GROUP_COUNT`` minus one.
   ``<resource-type>`` is the name of a resource type, converted to uppercase.
-  ``CTEST_PROCESS_<num>_<resource-type>`` is defined for the product of each
-  ``<num>`` in the range listed above and each resource type listed in
-  ``CTEST_PROCESS_<num>``.
+  ``CTEST_RESOURCE_GROUP_<num>_<resource-type>`` is defined for the product
+  of each ``<num>`` in the range listed above and each resource type listed in
+  ``CTEST_RESOURCE_GROUP_<num>``.
 
   Because some platforms have case-insensitive names for environment variables,
   the names of resource types may not clash in a case-insensitive environment.
   Because of this, for the sake of simplicity, all resource types must be
   listed in all lowercase in the
-  :ref:`hardware specification file <ctest-hardware-specification-file>` and in
-  the :prop_test:`PROCESSES` property, and they are converted to all uppercase
-  in the ``CTEST_PROCESS_<num>_<resource-type>`` environment variable.
+  :ref:`resource specification file <ctest-resource-specification-file>` and
+  in the :prop_test:`RESOURCE_GROUPS` property, and they are converted to all
+  uppercase in the ``CTEST_RESOURCE_GROUP_<num>_<resource-type>`` environment
+  variable.
 
 See Also
 ========

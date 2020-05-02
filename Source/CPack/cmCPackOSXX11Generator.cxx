@@ -178,6 +178,9 @@ int cmCPackOSXX11Generator::PackageFiles()
 
 int cmCPackOSXX11Generator::InitializeInternal()
 {
+  cmCPackLogger(cmCPackLog::LOG_WARNING,
+                "The OSXX11 generator is deprecated "
+                "and will be removed in a future version.\n");
   cmCPackLogger(cmCPackLog::LOG_DEBUG,
                 "cmCPackOSXX11Generator::Initialize()" << std::endl);
   std::vector<std::string> path;
@@ -240,7 +243,7 @@ bool cmCPackOSXX11Generator::CopyResourcePlistFile(
   const std::string& name, const std::string& dir,
   const char* outputFileName /* = 0 */, bool copyOnly /* = false */)
 {
-  std::string inFName = cmStrCat("Internal/CPack/CPack.", name, ".in");
+  std::string inFName = cmStrCat("CPack.", name, ".in");
   std::string inFileName = this->FindTemplate(inFName.c_str());
   if (inFileName.empty()) {
     cmCPackLogger(cmCPackLog::LOG_ERROR,

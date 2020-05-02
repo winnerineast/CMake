@@ -19,18 +19,23 @@ While features are typically specified in programming language standards,
 CMake provides a primary user interface based on granular handling of
 the features, not the language standard that introduced the feature.
 
-The :prop_gbl:`CMAKE_C_KNOWN_FEATURES` and
-:prop_gbl:`CMAKE_CXX_KNOWN_FEATURES` global properties contain all the
+The :prop_gbl:`CMAKE_C_KNOWN_FEATURES`, :prop_gbl:`CMAKE_CUDA_KNOWN_FEATURES`,
+and :prop_gbl:`CMAKE_CXX_KNOWN_FEATURES` global properties contain all the
 features known to CMake, regardless of compiler support for the feature.
-The :variable:`CMAKE_C_COMPILE_FEATURES` and
-:variable:`CMAKE_CXX_COMPILE_FEATURES` variables contain all features
+The :variable:`CMAKE_C_COMPILE_FEATURES`, :variable:`CMAKE_CUDA_COMPILE_FEATURES`
+, and :variable:`CMAKE_CXX_COMPILE_FEATURES` variables contain all features
 CMake knows are known to the compiler, regardless of language standard
 or compile flags needed to use them.
 
 Features known to CMake are named mostly following the same convention
-as the Clang feature test macros.  The are some exceptions, such as
+as the Clang feature test macros.  There are some exceptions, such as
 CMake using ``cxx_final`` and ``cxx_override`` instead of the single
 ``cxx_override_control`` used by Clang.
+
+Note that there are no separate compile features properties or variables for
+the ``OBJC`` or ``OBJCXX`` languages.  These are based off ``C`` or ``C++``
+respectively, so the properties and variables for their corresponding base
+language should be used instead.
 
 Compile Feature Requirements
 ============================
@@ -90,21 +95,21 @@ Requiring Language Standards
 In projects that use a large number of commonly available features from
 a particular language standard (e.g. C++ 11) one may specify a
 meta-feature (e.g. ``cxx_std_11``) that requires use of a compiler mode
-aware of that standard.  This is simpler than specifying all the
-features individually, but does not guarantee the existence of any
-particular feature.  Diagnosis of use of unsupported features will be
-delayed until compile time.
+that is at minimum aware of that standard, but could be greater.
+This is simpler than specifying all the features individually, but does
+not guarantee the existence of any particular feature.
+Diagnosis of use of unsupported features will be delayed until compile time.
 
 For example, if C++ 11 features are used extensively in a project's
-header files, then clients must use a compiler mode aware of C++ 11
-or above.  This can be requested with the code:
+header files, then clients must use a compiler mode that is no less
+than C++ 11.  This can be requested with the code:
 
 .. code-block:: cmake
 
   target_compile_features(mylib PUBLIC cxx_std_11)
 
 In this example, CMake will ensure the compiler is invoked in a mode
-that is aware of C++ 11 (or above), adding flags such as
+of at-least C++ 11 (or C++ 14, C++ 17, ...), adding flags such as
 ``-std=gnu++11`` if necessary.  This applies to sources within ``mylib``
 as well as any dependents (that may include headers from ``mylib``).
 
@@ -363,8 +368,9 @@ versions specified for each:
 * all compilers and versions listed above with only meta-features for C++.
 * ``TI``: Texas Instruments compiler.
 
-CMake is currently aware of the :prop_tgt:`CUDA standards <CUDA_STANDARD>`
-from the following :variable:`compiler ids <CMAKE_<LANG>_COMPILER_ID>` as of the
+CMake is currently aware of the :prop_tgt:`CUDA standards <CUDA_STANDARD>` and
+their associated meta-features (e.g. ``cuda_std_11``) available from the
+following :variable:`compiler ids <CMAKE_<LANG>_COMPILER_ID>` as of the
 versions specified for each:
 
 * ``NVIDIA``: NVIDIA nvcc compiler 7.5+.
