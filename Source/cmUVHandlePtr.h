@@ -8,7 +8,7 @@
 #include <memory>
 #include <type_traits>
 
-#include "cm_uv.h"
+#include <cm3p/uv.h>
 
 #if defined(__SUNPRO_CC)
 
@@ -128,7 +128,7 @@ public:
   // dtors to work.  Some compilers do not like '= default' here.
   uv_handle_ptr_base_() {} // NOLINT(modernize-use-equals-default)
   uv_handle_ptr_base_(std::nullptr_t) {}
-  ~uv_handle_ptr_base_() { reset(); }
+  ~uv_handle_ptr_base_() { this->reset(); }
 
   /**
    * Properly close the handle if needed and sets the inner handle to nullptr

@@ -33,8 +33,7 @@ cmSourceFileLocation::cmSourceFileLocation(cmMakefile const* mf,
   this->AmbiguousExtension = true;
   this->Directory = cmSystemTools::GetFilenamePath(name);
   if (cmSystemTools::FileIsFullPath(this->Directory)) {
-    this->Directory = cmSystemTools::CollapseFullPath(
-      this->Directory, mf->GetHomeOutputDirectory());
+    this->Directory = cmSystemTools::CollapseFullPath(this->Directory);
   }
   this->Name = cmSystemTools::GetFilenameName(name);
   if (kind == cmSourceFileLocationKind::Known) {
@@ -101,7 +100,7 @@ void cmSourceFileLocation::UpdateExtension(const std::string& name)
   cmMakefile const* mf = this->Makefile;
   auto cm = mf->GetCMakeInstance();
   if (!gg->GetLanguageFromExtension(ext.c_str()).empty() ||
-      cm->IsSourceExtension(ext) || cm->IsHeaderExtension(ext)) {
+      cm->IsAKnownExtension(ext)) {
     // This is a known extension.  Use the given filename with extension.
     this->Name = cmSystemTools::GetFilenameName(name);
     this->AmbiguousExtension = false;
@@ -157,7 +156,7 @@ bool cmSourceFileLocation::MatchesAmbiguousExtension(
   auto ext = cm::string_view(this->Name).substr(loc.Name.size() + 1);
   cmMakefile const* mf = this->Makefile;
   auto cm = mf->GetCMakeInstance();
-  return cm->IsSourceExtension(ext) || cm->IsHeaderExtension(ext);
+  return cm->IsAKnownExtension(ext);
 }
 
 bool cmSourceFileLocation::Matches(cmSourceFileLocation const& loc)

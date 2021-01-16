@@ -17,7 +17,7 @@
 #include "cmGetPipes.h"
 #include "cmStringAlgorithms.h"
 #if defined(_WIN32)
-#  include "cm_kwiml.h"
+#  include <cm3p/kwiml/int.h>
 #endif
 
 #define CM_PROCESS_BUF_SIZE 65536
@@ -177,7 +177,7 @@ bool cmProcess::Buffer::GetLine(std::string& line)
 
       // Start a new range for the next line.
       ++this->Last;
-      this->First = Last;
+      this->First = this->Last;
 
       // Return the line extracted.
       return true;
@@ -545,17 +545,17 @@ std::string cmProcess::GetExitExceptionString()
 #  endif
 #  ifdef SIGABRT
     case SIGABRT:
-      exception_str = "Child aborted";
+      exception_str = "Subprocess aborted";
       break;
 #  endif
 #  ifdef SIGKILL
     case SIGKILL:
-      exception_str = "Child killed";
+      exception_str = "Subprocess killed";
       break;
 #  endif
 #  ifdef SIGTERM
     case SIGTERM:
-      exception_str = "Child terminated";
+      exception_str = "Subprocess terminated";
       break;
 #  endif
 #  ifdef SIGHUP

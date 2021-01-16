@@ -9,7 +9,7 @@
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
- * are also available at https://curl.haxx.se/docs/copyright.html.
+ * are also available at https://curl.se/docs/copyright.html.
  *
  * You may opt to use, copy, modify, merge, publish, distribute and/or sell
  * copies of the Software, and permit persons to whom the Software is
@@ -77,13 +77,14 @@
 #include "http_digest.h"
 #include "system_win32.h"
 #include "http2.h"
+#include "dynbuf.h"
+#include "altsvc.h"
+#include "hsts.h"
 
 /* The last 3 #include files should be in this order */
 #include "curl_printf.h"
 #include "curl_memory.h"
 #include "memdebug.h"
-
-void Curl_version_init(void);
 
 /* true globals -- for curl_global_init() and curl_global_cleanup() */
 static unsigned int  initialized;
@@ -106,7 +107,6 @@ static long          init_flags;
 #  pragma warning(disable:4232) /* MSVC extension, dllimport identity */
 #endif
 
-#ifndef __SYMBIAN32__
 /*
  * If a memory-using function (like curl_getenv) is used before
  * curl_global_init() is called, we need to have these pointers set already.
@@ -118,17 +118,6 @@ curl_strdup_callback Curl_cstrdup = (curl_strdup_callback)system_strdup;
 curl_calloc_callback Curl_ccalloc = (curl_calloc_callback)calloc;
 #if defined(WIN32) && defined(UNICODE)
 curl_wcsdup_callback Curl_cwcsdup = (curl_wcsdup_callback)_wcsdup;
-#endif
-#else
-/*
- * Symbian OS doesn't support initialization to code in writable static data.
- * Initialization will occur in the curl_global_init() call.
- */
-curl_malloc_callback Curl_cmalloc;
-curl_free_callback Curl_cfree;
-curl_realloc_callback Curl_crealloc;
-curl_strdup_callback Curl_cstrdup;
-curl_calloc_callback Curl_ccalloc;
 #endif
 
 #if defined(_MSC_VER) && defined(_DLL) && !defined(__POCC__)
@@ -200,8 +189,6 @@ static CURLcode global_init(long flags, bool memoryfuncs)
 #endif
 
   init_flags = flags;
-
-  Curl_version_init();
 
   return CURLE_OK;
 
@@ -513,7 +500,7 @@ static CURLcode wait_or_timeout(struct Curl_multi *multi, struct events *ev)
     before = Curl_now();
 
     /* wait for activity or timeout */
-    pollrc = Curl_poll(fds, numfds, (int)ev->ms);
+    pollrc = Curl_poll(fds, numfds, ev->ms);
 
     after = Curl_now();
 
@@ -684,6 +671,7 @@ static CURLcode easy_perform(struct Curl_easy *data, bool events)
   mcode = curl_multi_add_handle(multi, data);
   if(mcode) {
     curl_multi_cleanup(multi);
+    data->multi_easy = NULL;
     if(mcode == CURLM_OUT_OF_MEMORY)
       return CURLE_OUT_OF_MEMORY;
     return CURLE_FAILED_INIT;
@@ -766,6 +754,7 @@ static CURLcode dupset(struct Curl_easy *dst, struct Curl_easy *src)
 {
   CURLcode result = CURLE_OK;
   enum dupstring i;
+  enum dupblob j;
 
   /* Copy src->set into dst->set first, then deal with the strings
      afterwards */
@@ -778,6 +767,16 @@ static CURLcode dupset(struct Curl_easy *dst, struct Curl_easy *src)
   /* duplicate all strings */
   for(i = (enum dupstring)0; i< STRING_LASTZEROTERMINATED; i++) {
     result = Curl_setstropt(&dst->set.str[i], src->set.str[i]);
+    if(result)
+      return result;
+  }
+
+  /* clear all blob pointers first */
+  memset(dst->set.blobs, 0, BLOB_LAST * sizeof(struct curl_blob *));
+  /* duplicate all blobs */
+  for(j = (enum dupblob)0; j < BLOB_LAST; j++) {
+    result = Curl_setblobopt(&dst->set.blobs[j], src->set.blobs[j]);
+    /* Curl_setstropt return CURLE_BAD_FUNCTION_ARGUMENT with blob */
     if(result)
       return result;
   }
@@ -820,23 +819,16 @@ struct Curl_easy *curl_easy_duphandle(struct Curl_easy *data)
    * the likeliness of us forgetting to init a buffer here in the future.
    */
   outcurl->set.buffer_size = data->set.buffer_size;
-  outcurl->state.buffer = malloc(outcurl->set.buffer_size + 1);
-  if(!outcurl->state.buffer)
-    goto fail;
-
-  outcurl->state.headerbuff = malloc(HEADERSIZE);
-  if(!outcurl->state.headerbuff)
-    goto fail;
-  outcurl->state.headersize = HEADERSIZE;
 
   /* copy all userdefined values */
   if(dupset(outcurl, data))
     goto fail;
 
+  Curl_dyn_init(&outcurl->state.headerb, CURL_MAX_HTTP_HEADER);
+
   /* the connection cache is setup on demand */
   outcurl->state.conn_cache = NULL;
-
-  outcurl->state.lastconnect = NULL;
+  outcurl->state.lastconnect_id = -1;
 
   outcurl->progress.flags    = data->progress.flags;
   outcurl->progress.callback = data->progress.callback;
@@ -881,11 +873,53 @@ struct Curl_easy *curl_easy_duphandle(struct Curl_easy *data)
       goto fail;
   }
 
+#ifdef USE_ALTSVC
+  if(data->asi) {
+    outcurl->asi = Curl_altsvc_init();
+    if(!outcurl->asi)
+      goto fail;
+    if(outcurl->set.str[STRING_ALTSVC])
+      (void)Curl_altsvc_load(outcurl->asi, outcurl->set.str[STRING_ALTSVC]);
+  }
+#endif
+#ifdef USE_HSTS
+  if(data->hsts) {
+    outcurl->hsts = Curl_hsts_init();
+    if(!outcurl->hsts)
+      goto fail;
+    if(outcurl->set.str[STRING_HSTS])
+      (void)Curl_hsts_loadfile(outcurl,
+                               outcurl->hsts, outcurl->set.str[STRING_HSTS]);
+    (void)Curl_hsts_loadcb(outcurl, outcurl->hsts);
+  }
+#endif
   /* Clone the resolver handle, if present, for the new handle */
   if(Curl_resolver_duphandle(outcurl,
                              &outcurl->state.resolver,
                              data->state.resolver))
     goto fail;
+
+#ifdef USE_ARES
+  {
+    CURLcode rc;
+
+    rc = Curl_set_dns_servers(outcurl, data->set.str[STRING_DNS_SERVERS]);
+    if(rc && rc != CURLE_NOT_BUILT_IN)
+      goto fail;
+
+    rc = Curl_set_dns_interface(outcurl, data->set.str[STRING_DNS_INTERFACE]);
+    if(rc && rc != CURLE_NOT_BUILT_IN)
+      goto fail;
+
+    rc = Curl_set_dns_local_ip4(outcurl, data->set.str[STRING_DNS_LOCAL_IP4]);
+    if(rc && rc != CURLE_NOT_BUILT_IN)
+      goto fail;
+
+    rc = Curl_set_dns_local_ip6(outcurl, data->set.str[STRING_DNS_LOCAL_IP6]);
+    if(rc && rc != CURLE_NOT_BUILT_IN)
+      goto fail;
+  }
+#endif /* USE_ARES */
 
   Curl_convert_setup(outcurl);
 
@@ -903,9 +937,11 @@ struct Curl_easy *curl_easy_duphandle(struct Curl_easy *data)
     curl_slist_free_all(outcurl->change.cookielist);
     outcurl->change.cookielist = NULL;
     Curl_safefree(outcurl->state.buffer);
-    Curl_safefree(outcurl->state.headerbuff);
+    Curl_dyn_free(&outcurl->state.headerb);
     Curl_safefree(outcurl->change.url);
     Curl_safefree(outcurl->change.referer);
+    Curl_altsvc_cleanup(&outcurl->asi);
+    Curl_hsts_cleanup(&outcurl->hsts);
     Curl_freeset(outcurl);
     free(outcurl);
   }
@@ -919,8 +955,6 @@ struct Curl_easy *curl_easy_duphandle(struct Curl_easy *data)
  */
 void curl_easy_reset(struct Curl_easy *data)
 {
-  long old_buffer_size = data->set.buffer_size;
-
   Curl_free_request_state(data);
 
   /* zero out UserDefined data: */
@@ -936,6 +970,7 @@ void curl_easy_reset(struct Curl_easy *data)
 
   data->progress.flags |= PGRS_HIDE;
   data->state.current_speed = -1; /* init to negative == impossible */
+  data->state.retrycount = 0;     /* reset the retry counter */
 
   /* zero out authentication data: */
   memset(&data->state.authhost, 0, sizeof(struct auth));
@@ -944,18 +979,6 @@ void curl_easy_reset(struct Curl_easy *data)
 #if !defined(CURL_DISABLE_HTTP) && !defined(CURL_DISABLE_CRYPTO_AUTH)
   Curl_http_auth_cleanup_digest(data);
 #endif
-
-  /* resize receive buffer */
-  if(old_buffer_size != data->set.buffer_size) {
-    char *newbuff = realloc(data->state.buffer, data->set.buffer_size + 1);
-    if(!newbuff) {
-      DEBUGF(fprintf(stderr, "Error: realloc of buffer failed\n"));
-      /* nothing we can do here except use the old size */
-      data->set.buffer_size = old_buffer_size;
-    }
-    else
-      data->state.buffer = newbuff;
-  }
 }
 
 /*
@@ -973,15 +996,36 @@ void curl_easy_reset(struct Curl_easy *data)
  */
 CURLcode curl_easy_pause(struct Curl_easy *data, int action)
 {
-  struct SingleRequest *k = &data->req;
+  struct SingleRequest *k;
   CURLcode result = CURLE_OK;
+  int oldstate;
+  int newstate;
 
-  /* first switch off both pause bits */
-  int newstate = k->keepon &~ (KEEP_RECV_PAUSE| KEEP_SEND_PAUSE);
+  if(!GOOD_EASY_HANDLE(data) || !data->conn)
+    /* crazy input, don't continue */
+    return CURLE_BAD_FUNCTION_ARGUMENT;
 
-  /* set the new desired pause bits */
-  newstate |= ((action & CURLPAUSE_RECV)?KEEP_RECV_PAUSE:0) |
+  k = &data->req;
+  oldstate = k->keepon & (KEEP_RECV_PAUSE| KEEP_SEND_PAUSE);
+
+  /* first switch off both pause bits then set the new pause bits */
+  newstate = (k->keepon &~ (KEEP_RECV_PAUSE| KEEP_SEND_PAUSE)) |
+    ((action & CURLPAUSE_RECV)?KEEP_RECV_PAUSE:0) |
     ((action & CURLPAUSE_SEND)?KEEP_SEND_PAUSE:0);
+
+  if((newstate & (KEEP_RECV_PAUSE| KEEP_SEND_PAUSE)) == oldstate) {
+    /* Not changing any pause state, return */
+    DEBUGF(infof(data, "pause: no change, early return\n"));
+    return CURLE_OK;
+  }
+
+  /* Unpause parts in active mime tree. */
+  if((k->keepon & ~newstate & KEEP_SEND_PAUSE) &&
+     (data->mstate == CURLM_STATE_PERFORM ||
+      data->mstate == CURLM_STATE_TOOFAST) &&
+     data->state.fread_func == (curl_read_callback) Curl_mime_read) {
+    Curl_mime_unpause(data->state.in);
+  }
 
   /* put it back in the keepon */
   k->keepon = newstate;
@@ -1001,7 +1045,7 @@ CURLcode curl_easy_pause(struct Curl_easy *data, int action)
       /* copy the structs to allow for immediate re-pausing */
       for(i = 0; i < data->state.tempcount; i++) {
         writebuf[i] = data->state.tempwrite[i];
-        data->state.tempwrite[i].buf = NULL;
+        Curl_dyn_init(&data->state.tempwrite[i].b, DYN_PAUSE_BUFFER);
       }
       data->state.tempcount = 0;
 
@@ -1015,9 +1059,10 @@ CURLcode curl_easy_pause(struct Curl_easy *data, int action)
         /* even if one function returns error, this loops through and frees
            all buffers */
         if(!result)
-          result = Curl_client_write(conn, writebuf[i].type, writebuf[i].buf,
-                                     writebuf[i].len);
-        free(writebuf[i].buf);
+          result = Curl_client_write(conn, writebuf[i].type,
+                                     Curl_dyn_ptr(&writebuf[i].b),
+                                     Curl_dyn_len(&writebuf[i].b));
+        Curl_dyn_free(&writebuf[i].b);
       }
 
       /* recover previous owner of the connection */
@@ -1033,8 +1078,12 @@ CURLcode curl_easy_pause(struct Curl_easy *data, int action)
      to have this handle checked soon */
   if((newstate & (KEEP_RECV_PAUSE|KEEP_SEND_PAUSE)) !=
      (KEEP_RECV_PAUSE|KEEP_SEND_PAUSE)) {
-    data->state.drain++;
     Curl_expire(data, 0, EXPIRE_RUN_NOW); /* get this handle going again */
+
+    if(!data->state.tempcount)
+      /* if not pausing again, force a recv/send check of this connection as
+         the data might've been read off the socket already */
+      data->conn->cselect_bits = CURL_CSELECT_IN | CURL_CSELECT_OUT;
     if(data->multi)
       Curl_update_timer(data->multi);
   }

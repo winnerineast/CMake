@@ -2,12 +2,18 @@ include(RunCMake)
 
 run_cmake(ExplicitCMakeLists)
 run_cmake(ImplicitCMakeLists)
+run_cmake(InterfaceLibSources)
+run_cmake_with_options(SearchPaths -DCMAKE_CONFIGURATION_TYPES=Debug)
 
 run_cmake(XcodeFileType)
 run_cmake(XcodeAttributeLocation)
 run_cmake(XcodeAttributeGenex)
 run_cmake(XcodeAttributeGenexError)
 run_cmake(XcodeGenerateTopLevelProjectOnly)
+
+if(XCODE_VERSION VERSION_GREATER_EQUAL 12)
+  run_cmake(XcodeDuplicateCustomCommand)
+endif()
 
 function(XcodeGenerateTopLevelProjectOnlyWithObjectLibrary)
   set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/XcodeGenerateTopLevelProjectOnlyWithObjectLibrary-build)
@@ -17,6 +23,19 @@ function(XcodeGenerateTopLevelProjectOnlyWithObjectLibrary)
 endfunction()
 
 XcodeGenerateTopLevelProjectOnlyWithObjectLibrary()
+
+function(LinkBinariesBuildPhase mode)
+  set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/LinkBinariesBuildPhase_${mode}-build)
+  set(RunCMake_TEST_OPTIONS "-DCMAKE_XCODE_LINK_BUILD_PHASE_MODE=${mode}")
+  run_cmake(LinkBinariesBuildPhase_${mode})
+  set(RunCMake_TEST_NO_CLEAN 1)
+  run_cmake_command(LinkBinariesBuildPhase_${mode}-build ${CMAKE_COMMAND} --build .)
+endfunction()
+
+LinkBinariesBuildPhase(NONE)
+LinkBinariesBuildPhase(BUILT_ONLY)
+LinkBinariesBuildPhase(KNOWN_LOCATION)
+run_cmake(LinkBinariesBuildPhase_INVALID)
 
 run_cmake(XcodeObjectNeedsEscape)
 run_cmake(XcodeObjectNeedsQuote)
@@ -32,6 +51,35 @@ run_cmake(PerConfigPerSourceFlags)
 run_cmake(PerConfigPerSourceOptions)
 run_cmake(PerConfigPerSourceDefinitions)
 run_cmake(PerConfigPerSourceIncludeDirs)
+
+if(XCODE_VERSION VERSION_GREATER_EQUAL 12)
+
+  function(XcodeObjectLibsInTwoProjectsiOS)
+    set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/XcodeObjectLibsInTwoProjects-build-ios)
+    set(RunCMake_TEST_OPTIONS "-DCMAKE_SYSTEM_NAME=iOS")
+
+    run_cmake(XcodeObjectLibsInTwoProjects)
+
+    set(RunCMake_TEST_NO_CLEAN 1)
+
+    run_cmake_command(XcodeObjectLibsInTwoProjects-build-ios ${CMAKE_COMMAND} --build . --target shared_lib -- -sdk iphonesimulator)
+  endfunction()
+
+  XcodeObjectLibsInTwoProjectsiOS()
+
+  function(XcodeObjectLibsInTwoProjectsMacOS)
+    set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/XcodeObjectLibsInTwoProjects-build-macos)
+
+    run_cmake(XcodeObjectLibsInTwoProjects)
+
+    set(RunCMake_TEST_NO_CLEAN 1)
+
+    run_cmake_command(XcodeObjectLibsInTwoProjects-build-macos ${CMAKE_COMMAND} --build . --target shared_lib)
+  endfunction()
+
+  XcodeObjectLibsInTwoProjectsMacOS()
+
+endif()
 
 function(XcodeSchemaGeneration)
   set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/XcodeSchemaGeneration-build)
@@ -119,8 +167,8 @@ if(NOT XCODE_VERSION VERSION_LESS 5)
   file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
 
   run_cmake(XcodeBundles)
-  run_cmake_command(XcodeBundles-build ${CMAKE_COMMAND} --build .)
-  run_cmake_command(XcodeBundles-install ${CMAKE_COMMAND} --build . --target install)
+  run_cmake_command(XcodeBundles-build-macOS ${CMAKE_COMMAND} --build .)
+  run_cmake_command(XcodeBundles-install-macOS ${CMAKE_COMMAND} --build . --target install)
 
   unset(RunCMake_TEST_BINARY_DIR)
   unset(RunCMake_TEST_NO_CLEAN)
@@ -136,8 +184,8 @@ if(NOT XCODE_VERSION VERSION_LESS 5)
   file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
 
   run_cmake(XcodeBundles)
-  run_cmake_command(XcodeBundles-build ${CMAKE_COMMAND} --build .)
-  run_cmake_command(XcodeBundles-install ${CMAKE_COMMAND} --build . --target install)
+  run_cmake_command(XcodeBundles-build-iOS ${CMAKE_COMMAND} --build .)
+  run_cmake_command(XcodeBundles-install-iOS ${CMAKE_COMMAND} --build . --target install)
 
   unset(RunCMake_TEST_BINARY_DIR)
   unset(RunCMake_TEST_NO_CLEAN)
@@ -155,8 +203,8 @@ if(NOT XCODE_VERSION VERSION_LESS 7)
   file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
 
   run_cmake(XcodeBundles)
-  run_cmake_command(XcodeBundles-build ${CMAKE_COMMAND} --build .)
-  run_cmake_command(XcodeBundles-install ${CMAKE_COMMAND} --build . --target install)
+  run_cmake_command(XcodeBundles-build-watchOS ${CMAKE_COMMAND} --build .)
+  run_cmake_command(XcodeBundles-install-watchOS ${CMAKE_COMMAND} --build . --target install)
 
   unset(RunCMake_TEST_BINARY_DIR)
   unset(RunCMake_TEST_NO_CLEAN)
@@ -174,8 +222,8 @@ if(NOT XCODE_VERSION VERSION_LESS 7.1)
   file(MAKE_DIRECTORY "${RunCMake_TEST_BINARY_DIR}")
 
   run_cmake(XcodeBundles)
-  run_cmake_command(XcodeBundles-build ${CMAKE_COMMAND} --build .)
-  run_cmake_command(XcodeBundles-install ${CMAKE_COMMAND} --build . --target install)
+  run_cmake_command(XcodeBundles-build-tvOS ${CMAKE_COMMAND} --build .)
+  run_cmake_command(XcodeBundles-install-tvOS ${CMAKE_COMMAND} --build . --target install)
 
   unset(RunCMake_TEST_BINARY_DIR)
   unset(RunCMake_TEST_NO_CLEAN)
@@ -188,7 +236,7 @@ if(NOT XCODE_VERSION VERSION_LESS 7)
   unset(RunCMake_TEST_OPTIONS)
 endif()
 
-if(NOT XCODE_VERSION VERSION_LESS 6)
+if(XCODE_VERSION VERSION_GREATER_EQUAL 6 AND XCODE_VERSION VERSION_LESS 12)
   # XcodeIOSInstallCombined
   set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/XcodeIOSInstallCombined-build)
   set(RunCMake_TEST_NO_CLEAN 1)
@@ -309,10 +357,10 @@ endif()
 if(XCODE_VERSION VERSION_GREATER_EQUAL 8)
   function(XcodeRemoveExcessiveISystemSDK SDK)
     set(RunCMake_TEST_BINARY_DIR ${RunCMake_BINARY_DIR}/XcodeRemoveExcessiveISystemSDK-${SDK}-build)
-    set(RunCMake_TEST_OPTIONS "-DCMAKE_SYSTEM_NAME=iOS")
+    set(RunCMake_TEST_OPTIONS "-DCMAKE_SYSTEM_NAME=iOS" "-DCMAKE_OSX_SYSROOT=${SDK}")
     run_cmake(XcodeRemoveExcessiveISystem)
     set(RunCMake_TEST_NO_CLEAN 1)
-    run_cmake_command(XcodeRemoveExcessiveISystemSDK-${SDK}-build ${CMAKE_COMMAND} --build . -- -sdk ${SDK})
+    run_cmake_command(XcodeRemoveExcessiveISystemSDK-${SDK}-build ${CMAKE_COMMAND} --build .)
   endfunction()
 
   XcodeRemoveExcessiveISystemSDK(iphoneos)

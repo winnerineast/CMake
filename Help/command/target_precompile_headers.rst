@@ -1,6 +1,8 @@
 target_precompile_headers
 -------------------------
 
+.. versionadded:: 3.16
+
 Add a list of header files to precompile.
 
 Precompiling header files can speed up compilation by creating a partially
@@ -93,7 +95,7 @@ Reusing Precompile Headers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The command also supports a second signature which can be used to specify that
-one target re-uses a precompiled header file artefact from another target
+one target re-uses a precompiled header file artifact from another target
 instead of generating its own:
 
 .. code-block:: cmake

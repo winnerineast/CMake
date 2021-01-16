@@ -5,7 +5,8 @@
 // POSIX APIs are needed
 #  define _POSIX_C_SOURCE 200809L
 #endif
-#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__) ||    \
+  defined(__QNX__)
 // For isascii
 #  define _XOPEN_SOURCE 700
 #endif
@@ -37,7 +38,7 @@ std::string cmTimestamp::CurrentTime(const std::string& formatString,
     return std::string();
   }
 
-  return CreateTimestampFromTimeT(currentTimeT, formatString, utcFlag);
+  return this->CreateTimestampFromTimeT(currentTimeT, formatString, utcFlag);
 }
 
 std::string cmTimestamp::FileModificationTime(const char* path,
@@ -52,7 +53,7 @@ std::string cmTimestamp::FileModificationTime(const char* path,
   }
 
   time_t mtime = cmsys::SystemTools::ModifiedTime(real_path);
-  return CreateTimestampFromTimeT(mtime, formatString, utcFlag);
+  return this->CreateTimestampFromTimeT(mtime, formatString, utcFlag);
 }
 
 std::string cmTimestamp::CreateTimestampFromTimeT(time_t timeT,
@@ -89,7 +90,7 @@ std::string cmTimestamp::CreateTimestampFromTimeT(time_t timeT,
                                             : static_cast<char>(0);
 
     if (c1 == '%' && c2 != 0) {
-      result += AddTimestampComponent(c2, timeStruct, timeT);
+      result += this->AddTimestampComponent(c2, timeStruct, timeT);
       ++i;
     } else {
       result += c1;
@@ -164,7 +165,7 @@ std::string cmTimestamp::AddTimestampComponent(char flag,
       break;
     case 's': // Seconds since UNIX epoch (midnight 1-jan-1970)
     {
-      // Build a time_t for UNIX epoch and substract from the input "timeT":
+      // Build a time_t for UNIX epoch and subtract from the input "timeT":
       struct tm tmUnixEpoch;
       memset(&tmUnixEpoch, 0, sizeof(tmUnixEpoch));
       tmUnixEpoch.tm_mday = 1;

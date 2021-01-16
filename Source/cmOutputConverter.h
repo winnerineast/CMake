@@ -1,7 +1,6 @@
 /* Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
    file Copyright.txt or https://cmake.org/licensing for details.  */
-#ifndef cmOutputConverter_h
-#define cmOutputConverter_h
+#pragma once
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
@@ -95,6 +94,14 @@ public:
   };
   static FortranFormat GetFortranFormat(cm::string_view value);
 
+  enum class FortranPreprocess
+  {
+    Unset,
+    NotNeeded,
+    Needed
+  };
+  static FortranPreprocess GetFortranPreprocess(cm::string_view value);
+
 private:
   cmState* GetState() const;
 
@@ -109,5 +116,3 @@ private:
 
   bool LinkScriptShell;
 };
-
-#endif

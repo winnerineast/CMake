@@ -1,7 +1,6 @@
 /* Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
    file Copyright.txt or https://cmake.org/licensing for details.  */
-#ifndef cmQtAutoGen_h
-#define cmQtAutoGen_h
+#pragma once
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
@@ -30,13 +29,13 @@ public:
     {
     }
 
-    bool operator>(IntegerVersion const version)
+    bool operator>(IntegerVersion const version) const
     {
       return (this->Major > version.Major) ||
         ((this->Major == version.Major) && (this->Minor > version.Minor));
     }
 
-    bool operator>=(IntegerVersion const version)
+    bool operator>=(IntegerVersion const version) const
     {
       return (this->Major > version.Major) ||
         ((this->Major == version.Major) && (this->Minor >= version.Minor));
@@ -112,20 +111,20 @@ public:
     RccLister(std::string rccExecutable, std::vector<std::string> listOptions);
 
     //! The rcc executable
-    std::string const& RccExcutable() const { return RccExcutable_; }
+    std::string const& RccExcutable() const { return this->RccExcutable_; }
     void SetRccExecutable(std::string const& rccExecutable)
     {
-      RccExcutable_ = rccExecutable;
+      this->RccExcutable_ = rccExecutable;
     }
 
     //! The rcc executable list options
     std::vector<std::string> const& ListOptions() const
     {
-      return ListOptions_;
+      return this->ListOptions_;
     }
     void SetListOptions(std::vector<std::string> const& listOptions)
     {
-      ListOptions_ = listOptions;
+      this->ListOptions_ = listOptions;
     }
 
     /**
@@ -141,5 +140,3 @@ public:
     std::vector<std::string> ListOptions_;
   };
 };
-
-#endif

@@ -83,6 +83,16 @@ function(cpack_deb_format_package_description TEXT OUTPUT_VAR)
   string(REPLACE "\n" ";" _lines "${_text}")
   list(POP_FRONT _lines _summary)
 
+  # If the description ends with a newline (e.g. typically if it was read
+  # from a file) the last line will be empty. We drop it here, otherwise
+  # it would be replaced by a `.` which would lead to the package violating
+  # the extended-description-contains-empty-paragraph debian policy
+  list(POP_BACK _lines _last_line)
+  string(STRIP "${_last_line}" _last_line_strip)
+  if(_last_line_strip)
+    list(APPEND _lines "${_last_line_strip}")
+  endif()
+
   # Check if reformatting required
   cpack_deb_check_description("${_summary}" "${_lines}" _result)
   if(_result)
@@ -537,8 +547,8 @@ function(cpack_deb_prepare_package_vars)
       message(FATAL_ERROR _description_failure_message)
     endif()
 
-  # Ok, description has set. According to the `Debian Policy Manual`_ the frist
-  # line is a pacakge summary.  Try to get it as well...
+  # Ok, description has set. According to the `Debian Policy Manual`_ the first
+  # line is a package summary.  Try to get it as well...
   # See also: https://www.debian.org/doc/debian-policy/ch-controlfields.html#description
   elseif(CPACK_PACKAGE_DESCRIPTION_SUMMARY AND
          NOT CPACK_PACKAGE_DESCRIPTION_SUMMARY STREQUAL CPACK_DEFAULT_PACKAGE_DESCRIPTION_SUMMARY)
@@ -758,6 +768,10 @@ function(cpack_deb_prepare_package_vars)
     set(GEN_CPACK_DBGSYM_OUTPUT_FILE_NAME "${CPACK_DBGSYM_OUTPUT_FILE_NAME}" PARENT_SCOPE)
     list(JOIN BUILD_IDS " " BUILD_IDS)
     set(GEN_BUILD_IDS "${BUILD_IDS}" PARENT_SCOPE)
+  else()
+    unset(GEN_DBGSYMDIR PARENT_SCOPE)
+    unset(GEN_CPACK_DBGSYM_OUTPUT_FILE_NAME PARENT_SCOPE)
+    unset(GEN_BUILD_IDS PARENT_SCOPE)
   endif()
 endfunction()
 

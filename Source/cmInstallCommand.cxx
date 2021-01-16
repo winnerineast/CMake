@@ -28,6 +28,7 @@
 #include "cmMakefile.h"
 #include "cmMessageType.h"
 #include "cmPolicies.h"
+#include "cmProperty.h"
 #include "cmStateTypes.h"
 #include "cmStringAlgorithms.h"
 #include "cmSubcommandTable.h"
@@ -467,6 +468,27 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
     // Track whether this is a namelink-only rule.
     bool namelinkOnly = false;
 
+    auto addTargetExport = [&]() {
+      // Add this install rule to an export if one was specified.
+      if (!exports.empty()) {
+        auto te = cm::make_unique<cmTargetExport>();
+        te->TargetName = target.GetName();
+        te->ArchiveGenerator = archiveGenerator.get();
+        te->BundleGenerator = bundleGenerator.get();
+        te->FrameworkGenerator = frameworkGenerator.get();
+        te->HeaderGenerator = publicHeaderGenerator.get();
+        te->LibraryGenerator = libraryGenerator.get();
+        te->RuntimeGenerator = runtimeGenerator.get();
+        te->ObjectsGenerator = objectGenerator.get();
+        te->InterfaceIncludeDirectories =
+          cmJoin(includesArgs.GetIncludeDirs(), ";");
+        te->NamelinkOnly = namelinkOnly;
+        helper.Makefile->GetGlobalGenerator()
+          ->GetExportSets()[exports]
+          .AddTargetExport(std::move(te));
+      }
+    };
+
     switch (target.GetType()) {
       case cmStateEnums::SHARED_LIBRARY: {
         // Shared libraries are handled differently on DLL and non-DLL
@@ -475,6 +497,8 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
         if (target.IsDLLPlatform()) {
           // When in namelink only mode skip all libraries on Windows.
           if (namelinkMode == cmInstallTargetGenerator::NamelinkModeOnly) {
+            namelinkOnly = true;
+            addTargetExport();
             continue;
           }
 
@@ -506,6 +530,8 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
           if (target.IsFrameworkOnApple()) {
             // When in namelink only mode skip frameworks.
             if (namelinkMode == cmInstallTargetGenerator::NamelinkModeOnly) {
+              namelinkOnly = true;
+              addTargetExport();
               continue;
             }
 
@@ -550,6 +576,8 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
         if (target.IsFrameworkOnApple()) {
           // When in namelink only mode skip frameworks.
           if (namelinkMode == cmInstallTargetGenerator::NamelinkModeOnly) {
+            namelinkOnly = true;
+            addTargetExport();
             continue;
           }
 
@@ -679,7 +707,7 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
 
     if (createInstallGeneratorsForTargetFileSets && !namelinkOnly) {
       cmProp files = target.GetProperty("PRIVATE_HEADER");
-      if (files && !files->empty()) {
+      if (cmNonempty(files)) {
         std::vector<std::string> relFiles = cmExpandedList(*files);
         std::vector<std::string> absFiles;
         if (!helper.MakeFilesFullPath("PRIVATE_HEADER", relFiles, absFiles)) {
@@ -701,7 +729,7 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
       }
 
       files = target.GetProperty("PUBLIC_HEADER");
-      if (files && !files->empty()) {
+      if (cmNonempty(files)) {
         std::vector<std::string> relFiles = cmExpandedList(*files);
         std::vector<std::string> absFiles;
         if (!helper.MakeFilesFullPath("PUBLIC_HEADER", relFiles, absFiles)) {
@@ -723,7 +751,7 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
       }
 
       files = target.GetProperty("RESOURCE");
-      if (files && !files->empty()) {
+      if (cmNonempty(files)) {
         std::vector<std::string> relFiles = cmExpandedList(*files);
         std::vector<std::string> absFiles;
         if (!helper.MakeFilesFullPath("RESOURCE", relFiles, absFiles)) {
@@ -743,25 +771,8 @@ bool HandleTargetsMode(std::vector<std::string> const& args,
       }
     }
 
-    // Add this install rule to an export if one was specified and
-    // this is not a namelink-only rule.
-    if (!exports.empty() && !namelinkOnly) {
-      auto te = cm::make_unique<cmTargetExport>();
-      te->TargetName = target.GetName();
-      te->ArchiveGenerator = archiveGenerator.get();
-      te->BundleGenerator = bundleGenerator.get();
-      te->FrameworkGenerator = frameworkGenerator.get();
-      te->HeaderGenerator = publicHeaderGenerator.get();
-      te->LibraryGenerator = libraryGenerator.get();
-      te->RuntimeGenerator = runtimeGenerator.get();
-      te->ObjectsGenerator = objectGenerator.get();
-      te->InterfaceIncludeDirectories =
-        cmJoin(includesArgs.GetIncludeDirs(), ";");
-
-      helper.Makefile->GetGlobalGenerator()
-        ->GetExportSets()[exports]
-        .AddTargetExport(std::move(te));
-    }
+    // Add this install rule to an export if one was specified.
+    addTargetExport();
 
     // Keep track of whether we're installing anything in each category
     installsArchive = installsArchive || archiveGenerator;
@@ -1156,7 +1167,7 @@ bool HandleDirectoryMode(std::vector<std::string> const& args,
     } else if (doing == DoingRegex) {
       literal_args += " REGEX \"";
 // Match rules are case-insensitive on some platforms.
-#if defined(_WIN32) || defined(__APPLE__) || defined(__CYGWIN__)
+#if defined(_WIN32) || defined(__APPLE__)
       std::string regex = cmSystemTools::LowerCase(args[i]);
 #else
       std::string regex = args[i];

@@ -33,7 +33,7 @@ function(CMAKE_DETERMINE_COMPILER_ABI lang src)
     __TestCompiler_setTryCompileTargetType()
 
     # Avoid failing ABI detection on warnings.
-    string(REGEX REPLACE "(^| )-Werror(=[^ ]*)?( |$)" " " CMAKE_${lang}_FLAGS "${CMAKE_${lang}_FLAGS}")
+    string(REGEX REPLACE "(^| )-Werror([= ][^ ]*)?( |$)" " " CMAKE_${lang}_FLAGS "${CMAKE_${lang}_FLAGS}")
 
     # Save the current LC_ALL, LC_MESSAGES, and LANG environment variables
     # and set them to "C" that way GCC's "search starts here" text is in
@@ -65,19 +65,35 @@ function(CMAKE_DETERMINE_COMPILER_ABI lang src)
     # Move result from cache to normal variable.
     set(CMAKE_${lang}_ABI_COMPILED ${CMAKE_${lang}_ABI_COMPILED})
     unset(CMAKE_${lang}_ABI_COMPILED CACHE)
+    if(CMAKE_${lang}_ABI_COMPILED AND _copy_error)
+      set(CMAKE_${lang}_ABI_COMPILED 0)
+    endif()
     set(CMAKE_${lang}_ABI_COMPILED ${CMAKE_${lang}_ABI_COMPILED} PARENT_SCOPE)
 
     # Load the resulting information strings.
-    if(CMAKE_${lang}_ABI_COMPILED AND NOT _copy_error)
+    if(CMAKE_${lang}_ABI_COMPILED)
       message(CHECK_PASS "done")
       file(APPEND ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeOutput.log
         "Detecting ${lang} compiler ABI info compiled with the following output:\n${OUTPUT}\n\n")
-      file(STRINGS "${BIN}" ABI_STRINGS LIMIT_COUNT 2 REGEX "INFO:[A-Za-z0-9_]+\\[[^]]*\\]")
+      file(STRINGS "${BIN}" ABI_STRINGS LIMIT_COUNT 32 REGEX "INFO:[A-Za-z0-9_]+\\[[^]]*\\]")
+      set(ABI_SIZEOF_DPTR "NOTFOUND")
+      set(ABI_BYTE_ORDER "NOTFOUND")
+      set(ABI_NAME "NOTFOUND")
       foreach(info ${ABI_STRINGS})
-        if("${info}" MATCHES "INFO:sizeof_dptr\\[0*([^]]*)\\]")
+        if("${info}" MATCHES "INFO:sizeof_dptr\\[0*([^]]*)\\]" AND NOT ABI_SIZEOF_DPTR)
           set(ABI_SIZEOF_DPTR "${CMAKE_MATCH_1}")
         endif()
-        if("${info}" MATCHES "INFO:abi\\[([^]]*)\\]")
+        if("${info}" MATCHES "INFO:byte_order\\[(BIG_ENDIAN|LITTLE_ENDIAN)\\]")
+          set(byte_order "${CMAKE_MATCH_1}")
+          if(ABI_BYTE_ORDER STREQUAL "NOTFOUND")
+            # Tentatively use the value because this is the first occurrence.
+            set(ABI_BYTE_ORDER "${byte_order}")
+          elseif(NOT ABI_BYTE_ORDER STREQUAL "${byte_order}")
+            # Drop value because multiple occurrences do not match.
+            set(ABI_BYTE_ORDER "")
+          endif()
+        endif()
+        if("${info}" MATCHES "INFO:abi\\[([^]]*)\\]" AND NOT ABI_NAME)
           set(ABI_NAME "${CMAKE_MATCH_1}")
         endif()
       endforeach()
@@ -86,6 +102,10 @@ function(CMAKE_DETERMINE_COMPILER_ABI lang src)
         set(CMAKE_${lang}_SIZEOF_DATA_PTR "${ABI_SIZEOF_DPTR}" PARENT_SCOPE)
       elseif(CMAKE_${lang}_SIZEOF_DATA_PTR_DEFAULT)
         set(CMAKE_${lang}_SIZEOF_DATA_PTR "${CMAKE_${lang}_SIZEOF_DATA_PTR_DEFAULT}" PARENT_SCOPE)
+      endif()
+
+      if(ABI_BYTE_ORDER)
+        set(CMAKE_${lang}_BYTE_ORDER "${ABI_BYTE_ORDER}" PARENT_SCOPE)
       endif()
 
       if(ABI_NAME)
